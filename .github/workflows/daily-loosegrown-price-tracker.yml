@@ -5,6 +5,7 @@ on:
 
 permissions:
   contents: write
+  issues: write
   pages: write
   id-token: write
 
@@ -29,6 +30,116 @@ jobs:
       - name: Measure Loose Grown Diamond lowest price
         shell: pwsh
         run: ./run.ps1
+
+      - name: Check daily price change
+        id: price_change
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $culture = [System.Globalization.CultureInfo]::InvariantCulture
+          $rows = @(Import-Csv -Path "data/loosegrown_price_history.csv")
+          $validRows = @(
+            $rows | Where-Object {
+              $_.Status -eq "ok" -and
+              $_.DateKST -and
+              $_.LowestPrice -match '^\d+(\.\d+)?$' -and
+              [double]::Parse($_.LowestPrice, $culture) -gt 0
+            }
+          )
+
+          $latestByDate = @{}
+          foreach ($row in $validRows) {
+            $latestByDate[$row.DateKST] = $row
+          }
+
+          $dates = @($latestByDate.Keys | Sort-Object)
+          if ($dates.Count -lt 2) {
+            "alert=false" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+            Write-Host "Not enough distinct dates to compare."
+            exit 0
+          }
+
+          $currentDate = $dates[$dates.Count - 1]
+          $previousDate = $dates[$dates.Count - 2]
+          $current = $latestByDate[$currentDate]
+          $previous = $latestByDate[$previousDate]
+          $currentPrice = [double]::Parse($current.LowestPrice, $culture)
+          $previousPrice = [double]::Parse($previous.LowestPrice, $culture)
+          $changePercent = (($currentPrice - $previousPrice) / $previousPrice) * 100.0
+          $absChangePercent = [Math]::Abs($changePercent)
+
+          $isAlert = $absChangePercent -ge 20.0
+          $direction = if ($changePercent -ge 0) { "rose" } else { "dropped" }
+          $directionKo = if ($changePercent -ge 0) { "떡상" } else { "떡락" }
+          $changeText = $changePercent.ToString("0.00", $culture)
+          $absChangeText = $absChangePercent.ToString("0.00", $culture)
+          $title = "[ALERT] LooseGrownDiamond price $direction $absChangeText% on $currentDate"
+
+          @(
+            "alert=$($isAlert.ToString().ToLowerInvariant())"
+            "title=$title"
+            "current_date=$currentDate"
+            "previous_date=$previousDate"
+            "current_price=$($current.LowestPrice)"
+            "previous_price=$($previous.LowestPrice)"
+            "change_percent=$changeText"
+            "abs_change_percent=$absChangeText"
+            "direction=$direction"
+            "direction_ko=$directionKo"
+            "sku=$($current.SKU)"
+            "carat=$($current.Carat)"
+            "total_matches=$($current.TotalMatches)"
+          ) | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+
+          Write-Host (("Previous {0}: $" -f $previousDate) + $previousPrice)
+          Write-Host (("Current  {0}: $" -f $currentDate) + $currentPrice)
+          Write-Host "Change: $changeText%"
+          if ($isAlert) {
+            Write-Host "Alert threshold met."
+          } else {
+            Write-Host "Alert threshold not met."
+          }
+
+      - name: Create price movement issue
+        if: steps.price_change.outputs.alert == 'true'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const title = `${{ steps.price_change.outputs.title }}`;
+            const { owner, repo } = context.repo;
+            const existing = await github.rest.search.issuesAndPullRequests({
+              q: `repo:${owner}/${repo} is:issue is:open in:title "${title.replace(/"/g, '\\"')}"`
+            });
+
+            if (existing.data.total_count > 0) {
+              core.info(`Open alert issue already exists: ${title}`);
+              return;
+            }
+
+            const body = [
+              '전일 대비 가격 변동이 20%를 넘었습니다.',
+              '',
+              `- 방향: ${{ steps.price_change.outputs.direction_ko }} (${{ steps.price_change.outputs.direction }})`,
+              `- 전일: ${{ steps.price_change.outputs.previous_date }} / $${{ steps.price_change.outputs.previous_price }}`,
+              `- 금일: ${{ steps.price_change.outputs.current_date }} / $${{ steps.price_change.outputs.current_price }}`,
+              `- 변동률: ${{ steps.price_change.outputs.change_percent }}%`,
+              `- SKU: ${{ steps.price_change.outputs.sku }}`,
+              `- Carat: ${{ steps.price_change.outputs.carat }}`,
+              `- Total matches: ${{ steps.price_change.outputs.total_matches }}`,
+              '',
+              'Chart:',
+              'https://ikboong.github.io/LooseGrownDiamondPriceTrackerCpp/loosegrown.html',
+              '',
+              'Source:',
+              'https://www.loosegrowndiamond.com/lab-created-colored-diamonds/?shape=heart&carat=5.00,51.03&certificate=1,2&intensity=4&cut=3.00,4.00&color=pink&clarity=7.00,11.00'
+            ].join('\n');
+
+            await github.rest.issues.create({
+              owner,
+              repo,
+              title,
+              body
+            });
 
       - name: Commit updated data and chart
         shell: pwsh

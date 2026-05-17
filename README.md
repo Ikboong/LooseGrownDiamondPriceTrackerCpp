@@ -17,6 +17,12 @@ C++로 Loose Grown Diamond 검색 조건의 최저 표시가를 매일 누적합
 - `data/loosegrown_price_history.csv`
 - `data/loosegrown_tradingview_chart.html`
 
+알림:
+
+- GitHub Actions 실행 시 CSV의 최근 두 날짜를 비교합니다.
+- 전일 대비 최저 표시가가 20% 이상 상승하거나 하락하면 GitHub Issue를 자동 생성합니다.
+- 같은 제목의 open issue가 이미 있으면 중복 생성하지 않습니다.
+
 차트:
 
 - 일봉: TradingView Lightweight Charts 라인차트
