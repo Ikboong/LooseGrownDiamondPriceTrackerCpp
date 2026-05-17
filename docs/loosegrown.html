@@ -1,0 +1,117 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Loose Grown Diamond Price Tracker</title>
+  <script src="https://unpkg.com/lightweight-charts@4.2.3/dist/lightweight-charts.standalone.production.js"></script>
+  <style>
+    :root { color-scheme: light; }
+    body { margin: 0; font-family: Arial, Helvetica, sans-serif; color: #172026; background: #f7f8fa; }
+    main { max-width: 1180px; margin: 0 auto; padding: 24px 18px 36px; }
+    header { display: flex; align-items: flex-end; justify-content: space-between; gap: 18px; margin-bottom: 18px; }
+    h1 { margin: 0; font-size: 24px; line-height: 1.2; }
+    .meta { color: #5f6b76; font-size: 13px; text-align: right; }
+    .chart-block { background: #fff; border: 1px solid #d9dee4; border-radius: 6px; margin-top: 14px; padding: 14px; }
+    .chart-title { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; margin-bottom: 10px; }
+    .chart-title h2 { margin: 0; font-size: 16px; }
+    .last { color: #0f766e; font-weight: 700; font-size: 14px; }
+    #dailyChart, #weeklyChart { width: 100%; height: 360px; }
+    .empty { background: #fff; border: 1px solid #d9dee4; border-radius: 6px; padding: 28px; color: #5f6b76; }
+  </style>
+</head>
+<body>
+<main>
+  <header>
+    <div>
+      <h1>Loose Grown Diamond Lowest Displayed Price</h1>
+    </div>
+    <div class="meta" id="meta"></div>
+  </header>
+  <div id="content"></div>
+</main>
+<script>
+const dailyData = [{"time":"2026-05-17","value":3920,"original":7467,"sku":"788614945","carat":"5.01"},{"time":"2026-05-17","value":3920,"original":7467,"sku":"788614945","carat":"5.01"},{"time":"2026-05-18","value":3920,"original":7467,"sku":"788614945","carat":"5.01"}];
+
+function formatPrice(price) {
+  return '$' + Math.round(price).toLocaleString('en-US');
+}
+
+function weekStartIso(isoDate) {
+  const date = new Date(isoDate + 'T00:00:00Z');
+  const day = date.getUTCDay() || 7;
+  date.setUTCDate(date.getUTCDate() - day + 1);
+  return date.toISOString().slice(0, 10);
+}
+
+function toWeeklyCandles(rows) {
+  const grouped = new Map();
+  for (const row of rows) {
+    const week = weekStartIso(row.time);
+    if (!grouped.has(week)) {
+      grouped.set(week, { time: week, open: row.value, high: row.value, low: row.value, close: row.value });
+    } else {
+      const candle = grouped.get(week);
+      candle.high = Math.max(candle.high, row.value);
+      candle.low = Math.min(candle.low, row.value);
+      candle.close = row.value;
+    }
+  }
+  return Array.from(grouped.values());
+}
+
+function chartOptions() {
+  return {
+    layout: { background: { color: '#ffffff' }, textColor: '#2f3a45' },
+    grid: { vertLines: { color: '#eef1f4' }, horzLines: { color: '#eef1f4' } },
+    rightPriceScale: { borderColor: '#d9dee4' },
+    timeScale: { borderColor: '#d9dee4', timeVisible: false },
+    localization: { priceFormatter: formatPrice },
+    crosshair: { mode: LightweightCharts.CrosshairMode.Normal },
+  };
+}
+
+const content = document.getElementById('content');
+if (!dailyData.length) {
+  content.innerHTML = '<div class="empty">No successful data yet.</div>';
+} else {
+  const last = dailyData[dailyData.length - 1];
+  document.getElementById('meta').textContent =
+    `Last ${last.time} · Final ${formatPrice(last.value)} · Original ${formatPrice(last.original)} · SKU ${last.sku}`;
+  content.innerHTML = `
+    <section class="chart-block">
+      <div class="chart-title"><h2>Daily Line Chart</h2><div class="last">${formatPrice(last.value)}</div></div>
+      <div id="dailyChart"></div>
+    </section>
+    <section class="chart-block">
+      <div class="chart-title"><h2>Weekly Candlestick Chart</h2><div class="last">OHLC from daily closes</div></div>
+      <div id="weeklyChart"></div>
+    </section>`;
+
+  const dailyChart = LightweightCharts.createChart(document.getElementById('dailyChart'), chartOptions());
+  const line = dailyChart.addLineSeries({ color: '#0f766e', lineWidth: 2, priceLineVisible: true });
+  line.setData(dailyData.map(row => ({ time: row.time, value: row.value })));
+  dailyChart.timeScale().fitContent();
+
+  const weeklyChart = LightweightCharts.createChart(document.getElementById('weeklyChart'), chartOptions());
+  const candles = weeklyChart.addCandlestickSeries({
+    upColor: '#0f766e',
+    downColor: '#dc2626',
+    borderUpColor: '#0f766e',
+    borderDownColor: '#dc2626',
+    wickUpColor: '#0f766e',
+    wickDownColor: '#dc2626',
+  });
+  candles.setData(toWeeklyCandles(dailyData));
+  weeklyChart.timeScale().fitContent();
+
+  const resize = () => {
+    dailyChart.applyOptions({ width: document.getElementById('dailyChart').clientWidth });
+    weeklyChart.applyOptions({ width: document.getElementById('weeklyChart').clientWidth });
+  };
+  window.addEventListener('resize', resize);
+  resize();
+}
+</script>
+</body>
+</html>
