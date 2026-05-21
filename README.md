@@ -1,5 +1,7 @@
 # LooseGrownDiamondPriceTrackerCpp
 
+[차트 바로 보기](https://ikboong.github.io/LooseGrownDiamondPriceTrackerCpp/loosegrown.html)
+
 C++로 Loose Grown Diamond 검색 조건의 최저 표시가를 매일 누적합니다.
 
 대상 URL:
