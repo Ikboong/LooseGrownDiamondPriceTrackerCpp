@@ -341,18 +341,28 @@ std::string JsonEscape(const std::string& value) {
 
 void WriteTradingViewChartHtml(const std::filesystem::path& path, const std::vector<Record>& records) {
     struct DailyPoint {
+        std::string timestamp;
         std::string date;
         double price;
         double originalPrice;
         std::string sku;
         std::string carat;
+        std::string totalMatches;
     };
 
     std::vector<DailyPoint> points;
     for (const auto& r : records) {
         if (r.status == "ok" && IsNumber(r.lowestPrice)) {
             double original = IsNumber(r.originalPrice) ? std::stod(r.originalPrice) : 0.0;
-            points.push_back({r.dateKst, std::stod(r.lowestPrice), original, r.sku, r.carat});
+            DailyPoint point{r.timestampKst, r.dateKst, std::stod(r.lowestPrice), original, r.sku, r.carat, r.totalMatches};
+            auto existing = std::find_if(points.begin(), points.end(), [&](const DailyPoint& p) {
+                return p.date == point.date;
+            });
+            if (existing == points.end()) {
+                points.push_back(point);
+            } else {
+                *existing = point;
+            }
         }
     }
 
@@ -365,10 +375,12 @@ void WriteTradingViewChartHtml(const std::filesystem::path& path, const std::vec
     for (size_t i = 0; i < points.size(); ++i) {
         if (i) data << ",";
         data << "{\"time\":\"" << JsonEscape(points[i].date) << "\","
+             << "\"timestamp\":\"" << JsonEscape(points[i].timestamp) << "\","
              << "\"value\":" << std::fixed << std::setprecision(0) << points[i].price << ","
              << "\"original\":" << std::fixed << std::setprecision(0) << points[i].originalPrice << ","
              << "\"sku\":\"" << JsonEscape(points[i].sku) << "\","
-             << "\"carat\":\"" << JsonEscape(points[i].carat) << "\"}";
+             << "\"carat\":\"" << JsonEscape(points[i].carat) << "\","
+             << "\"totalMatches\":\"" << JsonEscape(points[i].totalMatches) << "\"}";
     }
     data << "]";
 
@@ -380,32 +392,155 @@ void WriteTradingViewChartHtml(const std::filesystem::path& path, const std::vec
   <title>Loose Grown Diamond Price Tracker</title>
   <script src="https://unpkg.com/lightweight-charts@4.2.3/dist/lightweight-charts.standalone.production.js"></script>
   <style>
-    :root { color-scheme: light; }
-    body { margin: 0; font-family: Arial, Helvetica, sans-serif; color: #172026; background: #f7f8fa; }
-    main { max-width: 1180px; margin: 0 auto; padding: 24px 18px 36px; }
-    header { display: flex; align-items: flex-end; justify-content: space-between; gap: 18px; margin-bottom: 18px; }
-    h1 { margin: 0; font-size: 24px; line-height: 1.2; }
-    .meta { color: #5f6b76; font-size: 13px; text-align: right; }
-    .chart-block { background: #fff; border: 1px solid #d9dee4; border-radius: 6px; margin-top: 14px; padding: 14px; }
-    .chart-title { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; margin-bottom: 10px; }
-    .chart-title h2 { margin: 0; font-size: 16px; }
-    .last { color: #0f766e; font-weight: 700; font-size: 14px; }
-    #dailyChart, #weeklyChart { width: 100%; height: 360px; }
-    .empty { background: #fff; border: 1px solid #d9dee4; border-radius: 6px; padding: 28px; color: #5f6b76; }
+    :root {
+      color-scheme: dark;
+      --bg: #111418;
+      --panel: #1a1f25;
+      --panel-border: #2a3037;
+      --text: #c9d1d9;
+      --muted: #7d8b9a;
+      --grid: #242a30;
+      --blue: #3f83d8;
+      --button: #252b32;
+      --button-border: #303842;
+    }
+    :root.light {
+      color-scheme: light;
+      --bg: #f4f6f8;
+      --panel: #ffffff;
+      --panel-border: #d7dde4;
+      --text: #1d2630;
+      --muted: #667382;
+      --grid: #eef1f4;
+      --blue: #2f78d1;
+      --button: #eef2f6;
+      --button-border: #d7dde4;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      font-family: Arial, Helvetica, sans-serif;
+      color: var(--text);
+      background: var(--bg);
+    }
+    main {
+      width: min(100vw, 1600px);
+      margin: 0 auto;
+      padding: 20px 48px 34px;
+    }
+    header {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      align-items: center;
+      gap: 24px;
+      margin-bottom: 20px;
+    }
+    h1 {
+      margin: 0 0 4px;
+      font-size: 30px;
+      line-height: 1.1;
+      letter-spacing: 0;
+    }
+    .subtitle, .source {
+      color: var(--muted);
+      font-size: 18px;
+      line-height: 1.35;
+    }
+    .actions {
+      display: flex;
+      align-items: center;
+      gap: 16px;
+      min-width: 0;
+    }
+    .source { white-space: nowrap; }
+    button {
+      border: 1px solid var(--button-border);
+      border-radius: 8px;
+      background: var(--button);
+      color: var(--text);
+      cursor: pointer;
+      font: inherit;
+      height: 45px;
+      padding: 0 22px;
+    }
+    button.active {
+      background: var(--blue);
+      border-color: var(--blue);
+      color: #07111d;
+    }
+    .tabs {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin-bottom: 15px;
+    }
+    .chart-shell {
+      position: relative;
+      height: min(78vh, 850px);
+      min-height: 520px;
+      border: 1px solid var(--panel-border);
+      border-radius: 8px;
+      background: var(--panel);
+      overflow: hidden;
+    }
+    #chart {
+      width: 100%;
+      height: 100%;
+    }
+    .tv-mark {
+      position: absolute;
+      left: 14px;
+      bottom: 44px;
+      color: #b9c1cc;
+      font-size: 29px;
+      font-weight: 800;
+      letter-spacing: -2px;
+      opacity: 0.88;
+      pointer-events: none;
+    }
+    .empty {
+      border: 1px solid var(--panel-border);
+      border-radius: 8px;
+      padding: 28px;
+      background: var(--panel);
+      color: var(--muted);
+    }
+    @media (max-width: 760px) {
+      main { padding: 18px 14px 28px; }
+      header { grid-template-columns: 1fr; gap: 12px; }
+      h1 { font-size: 25px; }
+      .subtitle, .source { font-size: 14px; }
+      .actions { justify-content: flex-start; flex-wrap: wrap; gap: 10px; }
+      .source { width: 100%; white-space: normal; }
+      .chart-shell { height: 68vh; min-height: 430px; }
+      button { height: 42px; padding: 0 14px; }
+    }
   </style>
 </head>
 <body>
 <main>
   <header>
     <div>
-      <h1>Loose Grown Diamond Lowest Displayed Price</h1>
+      <h1>Loose Grown Diamond Charts</h1>
+      <div class="subtitle" id="subtitle"></div>
     </div>
-    <div class="meta" id="meta"></div>
+    <div class="actions">
+      <div class="source">Source: data/loosegrown_price_history.csv</div>
+      <button id="themeButton" type="button">Light</button>
+    </div>
   </header>
+  <div class="tabs" id="tabs" hidden>
+    <button class="active" id="dailyButton" type="button">Daily line</button>
+    <button id="weeklyButton" type="button">Weekly candle</button>
+  </div>
   <div id="content"></div>
 </main>
 <script>
 const dailyData = )html" << data.str() << R"html(;
+let activeView = 'daily';
+let currentChart = null;
+let isLight = false;
 
 function formatPrice(price) {
   return '$' + Math.round(price).toLocaleString('en-US');
@@ -435,14 +570,55 @@ function toWeeklyCandles(rows) {
 }
 
 function chartOptions() {
+  const styles = getComputedStyle(document.documentElement);
   return {
-    layout: { background: { color: '#ffffff' }, textColor: '#2f3a45' },
-    grid: { vertLines: { color: '#eef1f4' }, horzLines: { color: '#eef1f4' } },
-    rightPriceScale: { borderColor: '#d9dee4' },
-    timeScale: { borderColor: '#d9dee4', timeVisible: false },
+    autoSize: true,
+    layout: {
+      background: { color: styles.getPropertyValue('--panel').trim() },
+      textColor: styles.getPropertyValue('--text').trim(),
+    },
+    grid: {
+      vertLines: { color: styles.getPropertyValue('--grid').trim() },
+      horzLines: { color: styles.getPropertyValue('--grid').trim() },
+    },
+    rightPriceScale: { borderColor: styles.getPropertyValue('--panel-border').trim() },
+    timeScale: { borderColor: styles.getPropertyValue('--panel-border').trim(), timeVisible: false },
     localization: { priceFormatter: formatPrice },
     crosshair: { mode: LightweightCharts.CrosshairMode.Normal },
   };
+}
+
+function setActiveButton() {
+  document.getElementById('dailyButton').classList.toggle('active', activeView === 'daily');
+  document.getElementById('weeklyButton').classList.toggle('active', activeView === 'weekly');
+}
+
+function renderChart() {
+  const chartElement = document.getElementById('chart');
+  chartElement.innerHTML = '';
+  if (currentChart && currentChart.remove) currentChart.remove();
+  currentChart = LightweightCharts.createChart(chartElement, chartOptions());
+
+  if (activeView === 'daily') {
+    const line = currentChart.addLineSeries({
+      color: getComputedStyle(document.documentElement).getPropertyValue('--blue').trim(),
+      lineWidth: 2,
+      priceLineVisible: true,
+    });
+    line.setData(dailyData.map(row => ({ time: row.time, value: row.value })));
+  } else {
+    const candles = currentChart.addCandlestickSeries({
+      upColor: '#2f78d1',
+      downColor: '#d44d4d',
+      borderUpColor: '#2f78d1',
+      borderDownColor: '#d44d4d',
+      wickUpColor: '#2f78d1',
+      wickDownColor: '#d44d4d',
+    });
+    candles.setData(toWeeklyCandles(dailyData));
+  }
+  currentChart.timeScale().fitContent();
+  setActiveButton();
 }
 
 const content = document.getElementById('content');
@@ -450,41 +626,30 @@ if (!dailyData.length) {
   content.innerHTML = '<div class="empty">No successful data yet.</div>';
 } else {
   const last = dailyData[dailyData.length - 1];
-  document.getElementById('meta').textContent =
-    `Last ${last.time} · Final ${formatPrice(last.value)} · Original ${formatPrice(last.original)} · SKU ${last.sku}`;
+  document.getElementById('subtitle').textContent =
+    `Latest: ${last.timestamp} KST / ${formatPrice(last.value)} / ${dailyData.length} daily points`;
+  document.getElementById('tabs').hidden = false;
   content.innerHTML = `
-    <section class="chart-block">
-      <div class="chart-title"><h2>Daily Line Chart</h2><div class="last">${formatPrice(last.value)}</div></div>
-      <div id="dailyChart"></div>
-    </section>
-    <section class="chart-block">
-      <div class="chart-title"><h2>Weekly Candlestick Chart</h2><div class="last">OHLC from daily closes</div></div>
-      <div id="weeklyChart"></div>
+    <section class="chart-shell">
+      <div id="chart"></div>
+      <div class="tv-mark">TV</div>
     </section>`;
 
-  const dailyChart = LightweightCharts.createChart(document.getElementById('dailyChart'), chartOptions());
-  const line = dailyChart.addLineSeries({ color: '#0f766e', lineWidth: 2, priceLineVisible: true });
-  line.setData(dailyData.map(row => ({ time: row.time, value: row.value })));
-  dailyChart.timeScale().fitContent();
-
-  const weeklyChart = LightweightCharts.createChart(document.getElementById('weeklyChart'), chartOptions());
-  const candles = weeklyChart.addCandlestickSeries({
-    upColor: '#0f766e',
-    downColor: '#dc2626',
-    borderUpColor: '#0f766e',
-    borderDownColor: '#dc2626',
-    wickUpColor: '#0f766e',
-    wickDownColor: '#dc2626',
+  document.getElementById('dailyButton').addEventListener('click', () => {
+    activeView = 'daily';
+    renderChart();
   });
-  candles.setData(toWeeklyCandles(dailyData));
-  weeklyChart.timeScale().fitContent();
-
-  const resize = () => {
-    dailyChart.applyOptions({ width: document.getElementById('dailyChart').clientWidth });
-    weeklyChart.applyOptions({ width: document.getElementById('weeklyChart').clientWidth });
-  };
-  window.addEventListener('resize', resize);
-  resize();
+  document.getElementById('weeklyButton').addEventListener('click', () => {
+    activeView = 'weekly';
+    renderChart();
+  });
+  document.getElementById('themeButton').addEventListener('click', () => {
+    isLight = !isLight;
+    document.documentElement.classList.toggle('light', isLight);
+    document.getElementById('themeButton').textContent = isLight ? 'Dark' : 'Light';
+    renderChart();
+  });
+  renderChart();
 }
 </script>
 </body>
