@@ -1,14 +1,12 @@
 # LooseGrownDiamondPriceTrackerCpp
 
-## [실시간 가격 차트 바로 보기](https://ikboong.github.io/LooseGrownDiamondPriceTrackerCpp/loosegrown.html)
-
-웹 주소: [https://ikboong.github.io/LooseGrownDiamondPriceTrackerCpp/loosegrown.html](https://ikboong.github.io/LooseGrownDiamondPriceTrackerCpp/loosegrown.html)
+[차트 바로 보기](https://ikboong.github.io/LooseGrownDiamondPriceTrackerCpp/loosegrown.html)
 
 C++로 Loose Grown Diamond 검색 조건의 최저 표시가를 매일 누적합니다.
 
 대상 URL:
 
-`https://www.loosegrowndiamond.com/lab-created-colored-diamonds/?shape=heart&carat=5.00,51.03&certificate=1,2&intensity=4&cut=3.00,4.00&color=pink&clarity=7.00,11.00`
+[Loose Grown Diamond 검색 결과 열기](https://www.loosegrowndiamond.com/lab-created-colored-diamonds/?shape=heart&carat=5.00,51.03&certificate=1,2&intensity=4&cut=3.00,4.00&color=pink&clarity=7.00,11.00)
 
 수집 방식:
 
