@@ -132,16 +132,6 @@ std::string ExtractSucuriCookie(const std::string& html) {
     return name + "=" + value;
 }
 
-int ExtractDiscountPercent(const std::string& html) {
-    std::regex r(R"re(Save\s+([0-9]+)\s*%\s+on\s+Lab\s+Diamonds)re", std::regex_constants::icase);
-    std::smatch m;
-    if (!std::regex_search(html, m, r)) return 0;
-
-    int percent = std::stoi(m[1].str());
-    if (percent < 0 || percent > 95) return 0;
-    return percent;
-}
-
 int JsonIntField(const std::string& text, const std::string& field) {
     std::regex r("\"" + field + R"re("\s*:\s*([0-9]+))re");
     std::smatch m;
@@ -664,13 +654,7 @@ PriceResult FetchLowestPrice() {
     std::string cookie = ExtractSucuriCookie(challengeHtml);
     if (cookie.empty()) throw std::runtime_error("could not extract Sucuri challenge cookie");
 
-    std::string fullHtml = RunCommand(
-        "curl.exe -sS -L -A \"Mozilla/5.0\" -b \"" + cookie + "\" \"" + kPageUrl + "\"");
-    int discountPercent = ExtractDiscountPercent(fullHtml);
-    double discountMultiplier = (100.0 - discountPercent) / 100.0;
-
     PriceResult best;
-    best.discountPercent = discountPercent;
     const int perPage = 50;
     const std::string bodyFile = "loosegrown_body.json";
 
@@ -704,13 +688,20 @@ PriceResult FetchLowestPrice() {
             std::string basePriceText = JsonStringField(object, "price");
             if (basePriceText.empty()) continue;
 
-            double basePrice = std::stod(basePriceText);
-            double finalPrice = std::round(basePrice * discountMultiplier);
-            if (finalPrice < best.lowestPrice) {
-                best.lowestPrice = finalPrice;
-                best.basePrice = basePrice;
+            // The colored-diamond inventory API's price field is the value
+            // displayed in the search results. Site-wide promo banners can
+            // refer to other diamond categories and must not be applied again.
+            double displayedPrice = std::stod(basePriceText);
+            if (displayedPrice < best.lowestPrice) {
                 std::string originalPriceText = JsonStringField(object, "org_price");
-                best.originalPrice = originalPriceText.empty() ? basePrice : std::stod(originalPriceText);
+                double originalPrice = originalPriceText.empty() ? displayedPrice : std::stod(originalPriceText);
+
+                best.lowestPrice = displayedPrice;
+                best.basePrice = displayedPrice;
+                best.originalPrice = originalPrice;
+                best.discountPercent = originalPrice > displayedPrice
+                    ? static_cast<int>(std::lround((1.0 - displayedPrice / originalPrice) * 100.0))
+                    : 0;
                 best.sku = JsonStringField(object, "sku");
                 best.carat = JsonStringField(object, "carat");
                 best.id = JsonStringField(object, "id");
