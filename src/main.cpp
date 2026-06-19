@@ -13,6 +13,7 @@
 #include <sstream>
 #include <stdexcept>
 #include <string>
+#include <thread>
 #include <vector>
 
 struct PriceResult {
@@ -740,7 +741,19 @@ int main(int argc, char** argv) {
     record.sourceUrl = kPageUrl;
 
     try {
-        PriceResult result = FetchLowestPrice();
+        PriceResult result;
+        constexpr int kMaxFetchAttempts = 3;
+        for (int attempt = 1; attempt <= kMaxFetchAttempts; ++attempt) {
+            try {
+                result = FetchLowestPrice();
+                break;
+            } catch (const std::exception& ex) {
+                std::cerr << "Fetch attempt " << attempt << " failed: " << ex.what() << "\n";
+                if (attempt == kMaxFetchAttempts) throw;
+                std::this_thread::sleep_for(std::chrono::seconds(20));
+            }
+        }
+
         record.lowestPrice = FormatNumber(result.lowestPrice);
         record.originalPrice = FormatNumber(result.originalPrice);
         record.basePrice = FormatNumber(result.basePrice);
@@ -767,6 +780,9 @@ int main(int argc, char** argv) {
     std::cout << "Saved: " << chartPath.string() << "\n";
     std::cout << "Status: " << record.status << " price=" << record.lowestPrice
               << " original=" << record.originalPrice << " discount=" << record.discountPercent << "%\n";
+    if (record.status != "ok") {
+        std::cout << "Message: " << record.message << "\n";
+    }
 
     return record.status == "ok" ? 0 : 1;
 }
