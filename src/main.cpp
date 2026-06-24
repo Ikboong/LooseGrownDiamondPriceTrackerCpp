@@ -597,15 +597,15 @@ function renderChart() {
       priceLineVisible: true,
     });
     line.setData(dailyData.map(row => ({ time: row.time, value: row.value })));
-  } else {
-    const candles = currentChart.addCandlestickSeries({
-      upColor: '#2f78d1',
-      downColor: '#d44d4d',
-      borderUpColor: '#2f78d1',
-      borderDownColor: '#d44d4d',
-      wickUpColor: '#2f78d1',
-      wickDownColor: '#d44d4d',
-    });
+    } else {
+      const candles = currentChart.addCandlestickSeries({
+      upColor: '#d44d4d',
+      downColor: '#2f78d1',
+      borderUpColor: '#d44d4d',
+      borderDownColor: '#2f78d1',
+      wickUpColor: '#d44d4d',
+      wickDownColor: '#2f78d1',
+      });
     candles.setData(toWeeklyCandles(dailyData));
   }
   currentChart.timeScale().fitContent();
