@@ -784,5 +784,9 @@ int main(int argc, char** argv) {
         std::cout << "Message: " << record.message << "\n";
     }
 
-    return record.status == "ok" ? 0 : 1;
+    if (record.status != "ok") {
+        std::cout << "Fetch failed, but the failure was recorded in CSV. Keeping workflow successful.\n";
+    }
+
+    return 0;
 }
