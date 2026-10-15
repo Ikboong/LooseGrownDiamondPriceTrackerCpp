@@ -2,6 +2,10 @@
 #include <cstdlib>
 
 #include <algorithm>
+#include <atomic>
+#include <future>
+#include <map>
+#include <set>
 #include <chrono>
 #include <cmath>
 #include <filesystem>
@@ -15,6 +19,10 @@
 #include <string>
 #include <thread>
 #include <vector>
+
+#include "nivoda.h"
+#include "loosegrown.h"
+#include "chart_template.h"
 
 struct PriceResult {
     double lowestPrice = std::numeric_limits<double>::infinity();
@@ -43,6 +51,8 @@ struct Record {
     std::string status;
     std::string message;
     std::string sourceUrl;
+    std::string sourceId = "loosegrown";
+    std::string currency = "USD";
 };
 
 const std::string kPageUrl =
@@ -133,62 +143,6 @@ std::string ExtractSucuriCookie(const std::string& html) {
     return name + "=" + value;
 }
 
-int JsonIntField(const std::string& text, const std::string& field) {
-    std::regex r("\"" + field + R"re("\s*:\s*([0-9]+))re");
-    std::smatch m;
-    return std::regex_search(text, m, r) ? std::stoi(m[1].str()) : 0;
-}
-
-std::string JsonStringField(const std::string& object, const std::string& field) {
-    std::regex r("\"" + field + R"re("\s*:\s*"([^"]*)")re");
-    std::smatch m;
-    return std::regex_search(object, m, r) ? m[1].str() : "";
-}
-
-std::vector<std::string> ExtractDataObjects(const std::string& json) {
-    std::vector<std::string> objects;
-    size_t dataPos = json.find("\"data\"");
-    size_t arrayStart = json.find('[', dataPos);
-    if (arrayStart == std::string::npos) return objects;
-
-    bool inString = false;
-    bool escape = false;
-    int depth = 0;
-    size_t objStart = std::string::npos;
-
-    for (size_t i = arrayStart + 1; i < json.size(); ++i) {
-        char ch = json[i];
-        if (escape) {
-            escape = false;
-            continue;
-        }
-        if (ch == '\\' && inString) {
-            escape = true;
-            continue;
-        }
-        if (ch == '"') {
-            inString = !inString;
-            continue;
-        }
-        if (inString) continue;
-
-        if (ch == '{') {
-            if (depth == 0) objStart = i;
-            ++depth;
-        } else if (ch == '}') {
-            --depth;
-            if (depth == 0 && objStart != std::string::npos) {
-                objects.push_back(json.substr(objStart, i - objStart + 1));
-                objStart = std::string::npos;
-            }
-        } else if (ch == ']' && depth == 0) {
-            break;
-        }
-    }
-
-    return objects;
-}
-
 std::string CsvEscape(const std::string& value) {
     bool quote = value.find_first_of(",\"\r\n") != std::string::npos;
     if (!quote) return value;
@@ -235,15 +189,22 @@ std::vector<std::string> ParseCsvLine(const std::string& line) {
 std::string FormatNumber(double value) {
     if (!std::isfinite(value)) return "";
     std::ostringstream out;
-    out << std::fixed << std::setprecision(0) << value;
-    return out.str();
+    out << std::fixed << std::setprecision(2) << value;
+    auto text = out.str();
+    while (text.back() == '0') text.pop_back();
+    if (text.back() == '.') text.pop_back();
+    return text;
 }
 
 bool IsNumber(const std::string& value) {
     if (value.empty()) return false;
-    return std::all_of(value.begin(), value.end(), [](unsigned char ch) {
-        return (ch >= '0' && ch <= '9') || ch == '.';
-    });
+    try {
+        size_t used = 0;
+        const auto number = std::stod(value, &used);
+        return used == value.size() && std::isfinite(number) && number > 0;
+    } catch (const std::exception&) {
+        return false;
+    }
 }
 
 std::pair<std::string, std::string> CurrentKstTimestamp() {
@@ -269,389 +230,84 @@ std::vector<Record> ReadCsv(const std::filesystem::path& path) {
     while (std::getline(input, line)) {
         auto fields = ParseCsvLine(line);
         if (fields.size() < kCsvHeader.size()) fields.resize(kCsvHeader.size());
-        records.push_back({
+        Record record{
             fields[0], fields[1], fields[2], fields[3], fields[4], fields[5], fields[6],
             fields[7], fields[8], fields[9], fields[10], fields[11], fields[12],
-        });
+        };
+        if (fields.size() > 13) record.sourceId = fields[13];
+        if (fields.size() > 14) record.currency = fields[14];
+        records.push_back(record);
     }
     return records;
 }
 
-void WriteCsv(const std::filesystem::path& path, const std::vector<Record>& records) {
+void WriteCsv(const std::filesystem::path& path, const std::vector<Record>& records, bool siteHistory = false) {
     std::filesystem::create_directories(path.parent_path());
     std::ofstream output(path, std::ios::binary);
     if (!output) throw std::runtime_error("cannot write CSV: " + path.string());
 
-    for (size_t i = 0; i < kCsvHeader.size(); ++i) {
+    auto header = kCsvHeader;
+    if (siteHistory) { header.push_back("SourceId"); header.push_back("Currency"); }
+    for (size_t i = 0; i < header.size(); ++i) {
         if (i) output << ",";
-        output << kCsvHeader[i];
+        output << header[i];
     }
     output << "\n";
 
     for (const auto& r : records) {
-        const std::vector<std::string> fields = {
+        std::vector<std::string> fields = {
             r.timestampKst, r.dateKst, r.lowestPrice, r.originalPrice, r.basePrice,
             r.discountPercent, r.sku, r.carat, r.id, r.totalMatches, r.status, r.message, r.sourceUrl,
         };
+        if (siteHistory) { fields.push_back(r.sourceId); fields.push_back(r.currency); }
         for (size_t i = 0; i < fields.size(); ++i) {
             if (i) output << ",";
             output << CsvEscape(fields[i]);
         }
         output << "\n";
     }
+    if (!output) throw std::runtime_error("failed while writing CSV: " + path.string());
 }
 
-std::string XmlEscape(const std::string& value) {
-    std::string out;
-    for (char ch : value) {
-        switch (ch) {
-            case '&': out += "&amp;"; break;
-            case '<': out += "&lt;"; break;
-            case '>': out += "&gt;"; break;
-            case '"': out += "&quot;"; break;
-            default: out.push_back(ch); break;
-        }
-    }
-    return out;
-}
-
-std::string JsonEscape(const std::string& value) {
-    std::string out;
-    for (char ch : value) {
-        switch (ch) {
-            case '\\': out += "\\\\"; break;
-            case '"': out += "\\\""; break;
-            case '\n': out += "\\n"; break;
-            case '\r': out += "\\r"; break;
-            case '\t': out += "\\t"; break;
-            default: out.push_back(ch); break;
-        }
-    }
-    return out;
-}
-
-void WriteTradingViewChartHtml(const std::filesystem::path& path, const std::vector<Record>& records) {
-    struct DailyPoint {
-        std::string timestamp;
-        std::string date;
-        double price;
-        double originalPrice;
-        std::string sku;
-        std::string carat;
-        std::string totalMatches;
+Json RecordJson(const Record& record) {
+    Json row = {
+        {"time", record.dateKst}, {"timestamp", record.timestampKst},
+        {"value", nullptr}, {"original", 0}, {"sku", record.sku},
+        {"carat", record.carat}, {"totalMatches", record.totalMatches},
+        {"siteId", record.sourceId}, {"status", record.status},
+        {"message", record.message}, {"currency", record.currency},
+        {"sourceUrl", record.sourceUrl},
     };
+    if (record.status == "ok" && IsNumber(record.lowestPrice)) row["value"] = std::stod(record.lowestPrice);
+    if (IsNumber(record.originalPrice)) row["original"] = std::stod(record.originalPrice);
+    return row;
+}
 
-    std::vector<DailyPoint> points;
-    for (const auto& r : records) {
-        if (r.status == "ok" && IsNumber(r.lowestPrice)) {
-            double original = IsNumber(r.originalPrice) ? std::stod(r.originalPrice) : 0.0;
-            DailyPoint point{r.timestampKst, r.dateKst, std::stod(r.lowestPrice), original, r.sku, r.carat, r.totalMatches};
-            auto existing = std::find_if(points.begin(), points.end(), [&](const DailyPoint& p) {
-                return p.date == point.date;
-            });
-            if (existing == points.end()) {
-                points.push_back(point);
-            } else {
-                *existing = point;
-            }
-        }
+void WriteTradingViewChartHtml(const std::filesystem::path& path, const std::vector<Record>& records,
+                              const std::vector<Record>& siteRecords) {
+    std::map<std::string, Record> latestByDate;
+    for (const auto& record : records) {
+        if (record.status == "ok" && IsNumber(record.lowestPrice)) latestByDate[record.dateKst] = record;
     }
-
+    auto daily = Json::array();
+    for (const auto& entry : latestByDate) daily.push_back(RecordJson(entry.second));
+    auto sites = Json::array();
+    for (const auto& record : siteRecords) sites.push_back(RecordJson(record));
+    Json sources = Json::array({{{"id", "loosegrown"}, {"name", "Loose Grown Diamond"}, {"url", kPageUrl}}});
+    for (const auto& source : NivodaSources()) {
+        sources.push_back({{"id", source.id}, {"name", source.name}, {"url", source.pageUrl}});
+    }
     std::filesystem::create_directories(path.parent_path());
-    std::ofstream html(path, std::ios::binary);
-    if (!html) throw std::runtime_error("cannot write TradingView chart HTML: " + path.string());
-
-    std::ostringstream data;
-    data << "[";
-    for (size_t i = 0; i < points.size(); ++i) {
-        if (i) data << ",";
-        data << "{\"time\":\"" << JsonEscape(points[i].date) << "\","
-             << "\"timestamp\":\"" << JsonEscape(points[i].timestamp) << "\","
-             << "\"value\":" << std::fixed << std::setprecision(0) << points[i].price << ","
-             << "\"original\":" << std::fixed << std::setprecision(0) << points[i].originalPrice << ","
-             << "\"sku\":\"" << JsonEscape(points[i].sku) << "\","
-             << "\"carat\":\"" << JsonEscape(points[i].carat) << "\","
-             << "\"totalMatches\":\"" << JsonEscape(points[i].totalMatches) << "\"}";
-    }
-    data << "]";
-
-    html << R"html(<!doctype html>
-<html lang="en">
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Loose Grown Diamond Price Tracker</title>
-  <script src="https://unpkg.com/lightweight-charts@4.2.3/dist/lightweight-charts.standalone.production.js"></script>
-  <style>
-    :root {
-      color-scheme: dark;
-      --bg: #111418;
-      --panel: #1a1f25;
-      --panel-border: #2a3037;
-      --text: #c9d1d9;
-      --muted: #7d8b9a;
-      --grid: #242a30;
-      --blue: #3f83d8;
-      --button: #252b32;
-      --button-border: #303842;
-    }
-    :root.light {
-      color-scheme: light;
-      --bg: #f4f6f8;
-      --panel: #ffffff;
-      --panel-border: #d7dde4;
-      --text: #1d2630;
-      --muted: #667382;
-      --grid: #eef1f4;
-      --blue: #2f78d1;
-      --button: #eef2f6;
-      --button-border: #d7dde4;
-    }
-    * { box-sizing: border-box; }
-    body {
-      margin: 0;
-      min-height: 100vh;
-      font-family: Arial, Helvetica, sans-serif;
-      color: var(--text);
-      background: var(--bg);
-    }
-    main {
-      width: min(100vw, 1600px);
-      margin: 0 auto;
-      padding: 20px 48px 34px;
-    }
-    header {
-      display: grid;
-      grid-template-columns: minmax(0, 1fr) auto;
-      align-items: center;
-      gap: 24px;
-      margin-bottom: 20px;
-    }
-    h1 {
-      margin: 0 0 4px;
-      font-size: 30px;
-      line-height: 1.1;
-      letter-spacing: 0;
-    }
-    .subtitle, .source {
-      color: var(--muted);
-      font-size: 18px;
-      line-height: 1.35;
-    }
-    .actions {
-      display: flex;
-      align-items: center;
-      gap: 16px;
-      min-width: 0;
-    }
-    .source { white-space: nowrap; }
-    button {
-      border: 1px solid var(--button-border);
-      border-radius: 8px;
-      background: var(--button);
-      color: var(--text);
-      cursor: pointer;
-      font: inherit;
-      height: 45px;
-      padding: 0 22px;
-    }
-    button.active {
-      background: var(--blue);
-      border-color: var(--blue);
-      color: #07111d;
-    }
-    .tabs {
-      display: flex;
-      align-items: center;
-      gap: 10px;
-      margin-bottom: 15px;
-    }
-    .chart-shell {
-      position: relative;
-      height: min(78vh, 850px);
-      min-height: 520px;
-      border: 1px solid var(--panel-border);
-      border-radius: 8px;
-      background: var(--panel);
-      overflow: hidden;
-    }
-    #chart {
-      width: 100%;
-      height: 100%;
-    }
-    .tv-mark {
-      position: absolute;
-      left: 14px;
-      bottom: 44px;
-      color: #b9c1cc;
-      font-size: 29px;
-      font-weight: 800;
-      letter-spacing: -2px;
-      opacity: 0.88;
-      pointer-events: none;
-    }
-    .empty {
-      border: 1px solid var(--panel-border);
-      border-radius: 8px;
-      padding: 28px;
-      background: var(--panel);
-      color: var(--muted);
-    }
-    @media (max-width: 760px) {
-      main { padding: 18px 14px 28px; }
-      header { grid-template-columns: 1fr; gap: 12px; }
-      h1 { font-size: 25px; }
-      .subtitle, .source { font-size: 14px; }
-      .actions { justify-content: flex-start; flex-wrap: wrap; gap: 10px; }
-      .source { width: 100%; white-space: normal; }
-      .chart-shell { height: 68vh; min-height: 430px; }
-      button { height: 42px; padding: 0 14px; }
-    }
-  </style>
-</head>
-<body>
-<main>
-  <header>
-    <div>
-      <h1>Loose Grown Diamond Charts</h1>
-      <div class="subtitle" id="subtitle"></div>
-    </div>
-    <div class="actions">
-      <div class="source">Source: data/loosegrown_price_history.csv</div>
-      <button id="themeButton" type="button">Light</button>
-    </div>
-  </header>
-  <div class="tabs" id="tabs" hidden>
-    <button class="active" id="dailyButton" type="button">Daily line</button>
-    <button id="weeklyButton" type="button">Weekly candle</button>
-  </div>
-  <div id="content"></div>
-</main>
-<script>
-const dailyData = )html" << data.str() << R"html(;
-let activeView = 'daily';
-let currentChart = null;
-let isLight = false;
-
-function formatPrice(price) {
-  return '$' + Math.round(price).toLocaleString('en-US');
-}
-
-function weekStartIso(isoDate) {
-  const date = new Date(isoDate + 'T00:00:00Z');
-  const day = date.getUTCDay() || 7;
-  date.setUTCDate(date.getUTCDate() - day + 1);
-  return date.toISOString().slice(0, 10);
-}
-
-function toWeeklyCandles(rows) {
-  const grouped = new Map();
-  for (const row of rows) {
-    const week = weekStartIso(row.time);
-    if (!grouped.has(week)) {
-      grouped.set(week, { time: week, open: row.value, high: row.value, low: row.value, close: row.value });
-    } else {
-      const candle = grouped.get(week);
-      candle.high = Math.max(candle.high, row.value);
-      candle.low = Math.min(candle.low, row.value);
-      candle.close = row.value;
-    }
-  }
-  return Array.from(grouped.values());
-}
-
-function chartOptions() {
-  const styles = getComputedStyle(document.documentElement);
-  return {
-    autoSize: true,
-    layout: {
-      background: { color: styles.getPropertyValue('--panel').trim() },
-      textColor: styles.getPropertyValue('--text').trim(),
-    },
-    grid: {
-      vertLines: { color: styles.getPropertyValue('--grid').trim() },
-      horzLines: { color: styles.getPropertyValue('--grid').trim() },
-    },
-    rightPriceScale: { borderColor: styles.getPropertyValue('--panel-border').trim() },
-    timeScale: { borderColor: styles.getPropertyValue('--panel-border').trim(), timeVisible: false },
-    localization: { priceFormatter: formatPrice },
-    crosshair: { mode: LightweightCharts.CrosshairMode.Normal },
-  };
-}
-
-function setActiveButton() {
-  document.getElementById('dailyButton').classList.toggle('active', activeView === 'daily');
-  document.getElementById('weeklyButton').classList.toggle('active', activeView === 'weekly');
-}
-
-function renderChart() {
-  const chartElement = document.getElementById('chart');
-  chartElement.innerHTML = '';
-  if (currentChart && currentChart.remove) currentChart.remove();
-  currentChart = LightweightCharts.createChart(chartElement, chartOptions());
-
-  if (activeView === 'daily') {
-    const line = currentChart.addLineSeries({
-      color: getComputedStyle(document.documentElement).getPropertyValue('--blue').trim(),
-      lineWidth: 2,
-      priceLineVisible: true,
-    });
-    line.setData(dailyData.map(row => ({ time: row.time, value: row.value })));
-    } else {
-      const candles = currentChart.addCandlestickSeries({
-      upColor: '#d44d4d',
-      downColor: '#2f78d1',
-      borderUpColor: '#d44d4d',
-      borderDownColor: '#2f78d1',
-      wickUpColor: '#d44d4d',
-      wickDownColor: '#2f78d1',
-      });
-    candles.setData(toWeeklyCandles(dailyData));
-  }
-  currentChart.timeScale().fitContent();
-  setActiveButton();
-}
-
-const content = document.getElementById('content');
-if (!dailyData.length) {
-  content.innerHTML = '<div class="empty">No successful data yet.</div>';
-} else {
-  const last = dailyData[dailyData.length - 1];
-  document.getElementById('subtitle').textContent =
-    `Latest: ${last.timestamp} KST / ${formatPrice(last.value)} / ${dailyData.length} daily points`;
-  document.getElementById('tabs').hidden = false;
-  content.innerHTML = `
-    <section class="chart-shell">
-      <div id="chart"></div>
-      <div class="tv-mark">TV</div>
-    </section>`;
-
-  document.getElementById('dailyButton').addEventListener('click', () => {
-    activeView = 'daily';
-    renderChart();
-  });
-  document.getElementById('weeklyButton').addEventListener('click', () => {
-    activeView = 'weekly';
-    renderChart();
-  });
-  document.getElementById('themeButton').addEventListener('click', () => {
-    isLight = !isLight;
-    document.documentElement.classList.toggle('light', isLight);
-    document.getElementById('themeButton').textContent = isLight ? 'Dark' : 'Light';
-    renderChart();
-  });
-  renderChart();
-}
-</script>
-</body>
-</html>
-)html";
+    std::ofstream output(path, std::ios::binary);
+    if (!output) throw std::runtime_error("cannot write chart HTML: " + path.string());
+    output << RenderChartHtml(daily.dump(), sites.dump(), sources.dump());
+    if (!output) throw std::runtime_error("failed while writing chart HTML");
 }
 
 PriceResult FetchLowestPrice() {
     const std::string apiUrl = "https://www.loosegrowndiamond.com/wp-json/ls/v1/inventory-colored";
 
-    std::string challengeHtml = RunCommand("curl.exe -sS -L -A \"Mozilla/5.0\" \"" + kPageUrl + "\"");
+    std::string challengeHtml = RunCommand("curl.exe --fail --connect-timeout 15 --max-time 60 -sS -L -A \"Mozilla/5.0\" \"" + kPageUrl + "\"");
     std::string cookie = ExtractSucuriCookie(challengeHtml);
     if (cookie.empty()) throw std::runtime_error("could not extract Sucuri challenge cookie");
 
@@ -674,7 +330,7 @@ PriceResult FetchLowestPrice() {
         }
 
         std::string command =
-            "curl.exe -sS -L -A \"Mozilla/5.0\" "
+            "curl.exe --fail --connect-timeout 15 --max-time 60 -sS -L -A \"Mozilla/5.0\" "
             "-H \"Content-Type: application/json\" "
             "-H \"Accept: application/json, text/plain, */*\" "
             "-H \"Referer: " + kPageUrl + "\" "
@@ -682,31 +338,34 @@ PriceResult FetchLowestPrice() {
             "--data-binary \"@" + bodyFile + "\" "
             "\"" + apiUrl + "\"";
 
-        std::string json = RunCommand(command);
-        if (best.totalMatches == 0) best.totalMatches = JsonIntField(json, "total");
-
-        for (const std::string& object : ExtractDataObjects(json)) {
-            std::string basePriceText = JsonStringField(object, "price");
-            if (basePriceText.empty()) continue;
-
-            // The colored-diamond inventory API's price field is the value
-            // displayed in the search results. Site-wide promo banners can
-            // refer to other diamond categories and must not be applied again.
-            double displayedPrice = std::stod(basePriceText);
-            if (displayedPrice < best.lowestPrice) {
-                std::string originalPriceText = JsonStringField(object, "org_price");
-                double originalPrice = originalPriceText.empty() ? displayedPrice : std::stod(originalPriceText);
-
-                best.lowestPrice = displayedPrice;
-                best.basePrice = displayedPrice;
-                best.originalPrice = originalPrice;
-                best.discountPercent = originalPrice > displayedPrice
-                    ? static_cast<int>(std::lround((1.0 - displayedPrice / originalPrice) * 100.0))
-                    : 0;
-                best.sku = JsonStringField(object, "sku");
-                best.carat = JsonStringField(object, "carat");
-                best.id = JsonStringField(object, "id");
-            }
+        const auto inventory = ParseLoosegrownInventory(RunCommand(command));
+        const auto total = inventory.at("total").get<int>();
+        if (page == 1) best.totalMatches = total;
+        else if (total != best.totalMatches) throw std::runtime_error("Loose Grown Diamond inventory changed during pagination");
+        if (total == 0) {
+            std::remove(bodyFile.c_str());
+            best.status = "no_matches";
+            best.message = "No diamonds match the supplied search filters";
+            return best;
+        }
+        for (const auto& item : inventory.at("data")) {
+            // The API price is already the colored-diamond display price.
+            const auto displayedPrice = JsonPrice(item.at("price"));
+            if (displayedPrice >= best.lowestPrice) continue;
+            const auto originalField = item.value("org_price", Json());
+            const auto originalPrice = originalField.is_null() || originalField == ""
+                ? displayedPrice : JsonPrice(originalField);
+            const auto text = [](const Json& value) {
+                return value.is_string() ? value.get<std::string>() : value.dump();
+            };
+            best.lowestPrice = displayedPrice;
+            best.basePrice = displayedPrice;
+            best.originalPrice = originalPrice;
+            best.discountPercent = originalPrice > displayedPrice
+                ? static_cast<int>(std::lround((1 - displayedPrice / originalPrice) * 100)) : 0;
+            best.sku = text(item.at("sku"));
+            best.carat = text(item.at("carat"));
+            best.id = text(item.at("id"));
         }
 
         if (page * perPage >= best.totalMatches) break;
@@ -722,38 +381,90 @@ PriceResult FetchLowestPrice() {
     return best;
 }
 
-int main(int argc, char** argv) {
-    std::filesystem::path outputDir = "data";
-    for (int i = 1; i < argc; ++i) {
-        std::string arg = argv[i];
-        if (arg == "--output-dir" && i + 1 < argc) {
-            outputDir = argv[++i];
-        } else if (arg == "--help" || arg == "-h") {
-            std::cout << "Usage: LooseGrownDiamondPriceTracker.exe [--output-dir data]\n";
-            return 0;
-        }
+struct TemporaryJsonBody {
+    std::filesystem::path path;
+    explicit TemporaryJsonBody(const Json& body) {
+        static std::atomic<unsigned long long> serial{0};
+        const auto ticks = std::chrono::high_resolution_clock::now().time_since_epoch().count();
+        path = std::filesystem::temp_directory_path() /
+            ("diamond-request-" + std::to_string(ticks) + "-" + std::to_string(serial++) + ".json");
+        std::ofstream output(path, std::ios::binary);
+        if (!output) throw std::runtime_error("cannot create API request file");
+        output << body.dump();
+        if (!output) throw std::runtime_error("cannot write API request file");
     }
+    ~TemporaryJsonBody() { std::error_code error; std::filesystem::remove(path, error); }
+};
 
-    auto [timestamp, date] = CurrentKstTimestamp();
+Json PostJson(const std::string& url, const Json& body) {
+    TemporaryJsonBody file(body);
+    const auto command = "curl.exe --fail --connect-timeout 15 --max-time 60 -sS -L "
+        "-A \"Mozilla/5.0\" -H \"Content-Type: application/json\" --data-binary \"@"
+        + file.path.string() + "\" \"" + url + "\"";
+    return Json::parse(RunCommand(command));
+}
+
+PriceResult FetchNivodaLowestPrice(const NivodaSource& source) {
+    const auto request = BuildNivodaRequest(source);
+    const auto countResponse = PostJson(source.origin + "/apps/diamond-proxy/api/count",
+        {{"callFrom", "feed"}, {"query", request.at("query")}});
+    const auto& countValue = countResponse.at("data").at("diamonds_by_query_count");
+    if (!countValue.is_number_integer()) throw std::runtime_error("invalid inventory count");
+    const int count = countValue.get<int>();
+    if (count < 0 || count > 10000) throw std::runtime_error("inventory count outside supported range");
+    PriceResult best;
+    best.totalMatches = count;
+    if (count == 0) {
+        best.status = "no_matches";
+        best.message = "No diamonds match the supplied search filters";
+        return best;
+    }
+    std::set<std::string> ids;
+    int offset = 0;
+    while (offset < count) {
+        const auto feed = PostJson(source.origin + "/apps/diamond-proxy/api/v2/feed", BuildNivodaRequest(source, offset));
+        if (!feed.is_array() || feed.empty()) throw std::runtime_error("inventory feed ended before its advertised count");
+        for (const auto& item : feed) {
+            const auto quote = ParseNivodaQuote(item, source);
+            if (!ids.insert(quote.id).second) throw std::runtime_error("duplicate inventory id across pages; collection is incomplete");
+            if (quote.price >= best.lowestPrice) continue;
+            best.lowestPrice = quote.price;
+            best.basePrice = quote.price;
+            best.originalPrice = quote.originalPrice;
+            best.discountPercent = quote.originalPrice > quote.price
+                ? static_cast<int>(std::lround((1 - quote.price / quote.originalPrice) * 100)) : 0;
+            best.sku = quote.id;
+            best.id = quote.id;
+            best.carat = quote.carat;
+        }
+        offset += static_cast<int>(feed.size());
+    }
+    if (static_cast<int>(ids.size()) != count) throw std::runtime_error("inventory changed during pagination; retrying the complete snapshot");
+    best.message = "ok";
+    return best;
+}
+
+Record CollectSource(const std::string& id) {
     Record record;
-    record.timestampKst = timestamp;
-    record.dateKst = date;
-    record.sourceUrl = kPageUrl;
-
+    const auto timestamp = CurrentKstTimestamp();
+    record.timestampKst = timestamp.first;
+    record.dateKst = timestamp.second;
+    record.sourceId = id;
+    const auto& sources = NivodaSources();
+    const auto found = std::find_if(sources.begin(), sources.end(), [&](const NivodaSource& source) { return source.id == id; });
+    record.sourceUrl = id == "loosegrown" ? kPageUrl : found->pageUrl;
     try {
         PriceResult result;
-        constexpr int kMaxFetchAttempts = 3;
-        for (int attempt = 1; attempt <= kMaxFetchAttempts; ++attempt) {
+        for (int attempt = 1; attempt <= 3; ++attempt) {
             try {
-                result = FetchLowestPrice();
+                result = id == "loosegrown" ? FetchLowestPrice() : FetchNivodaLowestPrice(*found);
                 break;
-            } catch (const std::exception& ex) {
-                std::cerr << "Fetch attempt " << attempt << " failed: " << ex.what() << "\n";
-                if (attempt == kMaxFetchAttempts) throw;
-                std::this_thread::sleep_for(std::chrono::seconds(20));
+            } catch (const std::exception& error) {
+                std::cerr << id << " attempt " << attempt << " failed: " << error.what() << "\n";
+                if (attempt == 3) throw;
+                std::this_thread::sleep_for(std::chrono::seconds(5));
             }
         }
-
         record.lowestPrice = FormatNumber(result.lowestPrice);
         record.originalPrice = FormatNumber(result.originalPrice);
         record.basePrice = FormatNumber(result.basePrice);
@@ -764,29 +475,63 @@ int main(int argc, char** argv) {
         record.totalMatches = std::to_string(result.totalMatches);
         record.status = result.status;
         record.message = result.message;
-    } catch (const std::exception& ex) {
+    } catch (const std::exception& error) {
         record.status = "error";
-        record.message = ex.what();
+        record.message = error.what();
     }
+    const auto observed = CurrentKstTimestamp();
+    record.timestampKst = observed.first;
+    record.dateKst = observed.second;
+    return record;
+}
 
-    const auto csvPath = outputDir / "loosegrown_price_history.csv";
-    const auto chartPath = outputDir / "loosegrown_tradingview_chart.html";
-    auto records = ReadCsv(csvPath);
-    records.push_back(record);
-    WriteCsv(csvPath, records);
-    WriteTradingViewChartHtml(chartPath, records);
-
-    std::cout << "Saved: " << csvPath.string() << "\n";
-    std::cout << "Saved: " << chartPath.string() << "\n";
-    std::cout << "Status: " << record.status << " price=" << record.lowestPrice
-              << " original=" << record.originalPrice << " discount=" << record.discountPercent << "%\n";
-    if (record.status != "ok") {
-        std::cout << "Message: " << record.message << "\n";
+int main(int argc, char** argv) {
+    try {
+        std::filesystem::path outputDir = "data";
+        bool chartOnly = false;
+        std::string sourceFilter;
+        for (int i = 1; i < argc; ++i) {
+            const std::string arg = argv[i];
+            if (arg == "--output-dir" && i + 1 < argc) outputDir = argv[++i];
+            else if (arg == "--source" && i + 1 < argc) sourceFilter = argv[++i];
+            else if (arg == "--chart-only") chartOnly = true;
+            else if (arg == "--help" || arg == "-h") {
+                std::cout << "Usage: LooseGrownDiamondPriceTracker.exe [--output-dir data] [--chart-only] [--source loosegrown|carbonsparkle|aurelinne|altura]\n";
+                return 0;
+            } else throw std::runtime_error("unknown or incomplete argument: " + arg);
+        }
+        const auto csvPath = outputDir / "loosegrown_price_history.csv";
+        const auto sitesPath = outputDir / "site_price_history.csv";
+        auto records = ReadCsv(csvPath);
+        auto siteRecords = ReadCsv(sitesPath);
+        std::vector<std::string> sourceIds = {"loosegrown"};
+        for (const auto& source : NivodaSources()) sourceIds.push_back(source.id);
+        if (!sourceFilter.empty() && std::find(sourceIds.begin(), sourceIds.end(), sourceFilter) == sourceIds.end()) {
+            throw std::runtime_error("unknown source: " + sourceFilter);
+        }
+        if (!chartOnly) {
+            std::vector<std::future<Record>> pending;
+            for (const auto& id : sourceIds) {
+                if (!sourceFilter.empty() && sourceFilter != id) continue;
+                pending.push_back(std::async(std::launch::async, CollectSource, id));
+            }
+            for (auto& future : pending) {
+                auto record = future.get();
+                if (record.sourceId == "loosegrown") records.push_back(record);
+                siteRecords.push_back(record);
+                std::cout << record.sourceId << ": " << record.status << " price=" << record.lowestPrice
+                    << " USD matches=" << record.totalMatches << "\n";
+                if (record.status != "ok") std::cout << "Message: " << record.message << "\n";
+            }
+            WriteCsv(csvPath, records);
+            WriteCsv(sitesPath, siteRecords, true);
+        }
+        const auto chartPath = outputDir / "loosegrown_tradingview_chart.html";
+        WriteTradingViewChartHtml(chartPath, records, siteRecords);
+        std::cout << "Saved: " << chartPath.string() << "\n";
+        return 0;
+    } catch (const std::exception& error) {
+        std::cerr << "Tracker failed: " << error.what() << "\n";
+        return 1;
     }
-
-    if (record.status != "ok") {
-        std::cout << "Fetch failed, but the failure was recorded in CSV. Keeping workflow successful.\n";
-    }
-
-    return 0;
 }

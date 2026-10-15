@@ -1,5 +1,8 @@
 param(
-    [string]$OutputDir = ""
+    [string]$OutputDir = "",
+    [switch]$ChartOnly,
+    [ValidateSet("loosegrown", "carbonsparkle", "aurelinne", "altura")]
+    [string]$Source = ""
 )
 
 $ErrorActionPreference = "Stop"
@@ -23,6 +26,8 @@ $Args = @()
 if ($OutputDir) {
     $Args += @("--output-dir", $OutputDir)
 }
+if ($ChartOnly) { $Args += "--chart-only" }
+if ($Source) { $Args += @("--source", $Source) }
 
 & $Exe @Args
 exit $LASTEXITCODE
