@@ -23,9 +23,9 @@ C++로 네 사이트의 지정 검색 조건에 맞는 최저 표시가를 매�
 
 | 사이트 | 지정 검색 조건 | 링크 |
 |---|---|---|
-| Carbon Sparkle | Heart, Pink/Red, 5~50ct, VVS2~FL, Fancy Deep~Fancy Vivid, ID | [검색 결과](https://www.carbonsparkle.com/pages/diamonds?activeTab=Lab+Grown&queryLabGrown=true&isFancy=true&fancy_color=Red%2CPink&carats_min=5&carats_max=50&clarity_min=VVS2&clarity_max=FL&intensity_min=Fancy_Deep&intensity_max=Fancy_Vivid&cut_min=ID&cut_max=ID&shapes=heart) |
-| Aurelinne | Heart, Pink/Red, 5~20ct, VVS2~FL, Fancy Deep~Fancy Vivid, ID | [검색 결과](https://aurelinne.com/pages/lab-grown?activeTab=Lab+Grown&queryLabGrown=true&isFancy=true&carats_min=5&carats_max=20&clarity_min=VVS2&clarity_max=FL&fancy_color=Pink%2CRed&intensity_min=Fancy_Deep&intensity_max=Fancy_Vivid&cut_min=ID&cut_max=ID&shapes=heart) |
-| Altura Diamonds | Heart, Pink/Red, 5~20ct, VVS2~FL, Fancy Deep~Fancy Vivid, ID, Polish EX, Symmetry EX | [검색 결과](https://alturadiamonds.com/collections/lab-diamonds?activeTab=Lab+Grown&queryLabGrown=true&shapes=heart&carats_min=5&carats_max=20&cut_min=ID&cut_max=ID&clarity_min=VVS2&clarity_max=FL&polish=EX&symmetry=EX&isFancy=true&fancy_color=Pink%2CRed&intensity_min=Fancy_Deep&intensity_max=Fancy_Vivid) |
+| Carbon Sparkle | Heart, Pink/Red, 5–50ct, VVS2–FL, Fancy Deep–Fancy Vivid, ID | [검색 결과](https://www.carbonsparkle.com/pages/diamonds?activeTab=Lab+Grown&queryLabGrown=true&isFancy=true&fancy_color=Red%2CPink&carats_min=5&carats_max=50&clarity_min=VVS2&clarity_max=FL&intensity_min=Fancy_Deep&intensity_max=Fancy_Vivid&cut_min=ID&cut_max=ID&shapes=heart) |
+| Aurelinne | Heart, Pink/Red, 5–20ct, VVS2–FL, Fancy Deep–Fancy Vivid, ID | [검색 결과](https://aurelinne.com/pages/lab-grown?activeTab=Lab+Grown&queryLabGrown=true&isFancy=true&carats_min=5&carats_max=20&clarity_min=VVS2&clarity_max=FL&fancy_color=Pink%2CRed&intensity_min=Fancy_Deep&intensity_max=Fancy_Vivid&cut_min=ID&cut_max=ID&shapes=heart) |
+| Altura Diamonds | Heart, Pink/Red, 5–20ct, VVS2–FL, Fancy Deep–Fancy Vivid, ID, Polish EX, Symmetry EX | [검색 결과](https://alturadiamonds.com/collections/lab-diamonds?activeTab=Lab+Grown&queryLabGrown=true&shapes=heart&carats_min=5&carats_max=20&cut_min=ID&cut_max=ID&clarity_min=VVS2&clarity_max=FL&polish=EX&symmetry=EX&isFancy=true&fancy_color=Pink%2CRed&intensity_min=Fancy_Deep&intensity_max=Fancy_Vivid) |
 
 수집 방식:
 
@@ -36,7 +36,7 @@ C++로 네 사이트의 지정 검색 조건에 맞는 최저 표시가를 매�
 - 추가 세 사이트는 각 도메인의 Nivoda Connect 공개 API `/apps/diamond-proxy/api/count`와 `/apps/diamond-proxy/api/v2/feed`를 사용합니다.
 - Nivoda의 표시 가격은 `discountedPrice`가 유효하게 설정되어 있으면 그 값, 그 외에는 `price`를 사용합니다. 배너 할인을 추가로 곱하지 않습니다.
 - API에 오름차순 정렬을 요청해도 최종 표시 가격이 순서대로 오지 않으므로 **전체 페이지를 조회**해 최저가를 계산합니다. 불완전한 페이지 응답이나 중복 ID는 오류로 기록하고 부분 재고의 가격을 확정 최저가로 저장하지 않습니다.
-- 링크에 없는 기본 필터도 실제 각 사이트 검색 앱과 맞춥니다. Carbon Sparkle의 감정서는 GIA/IGI/GCAL/NONE/OTHER, Aurelinne은 GIA/IGI/HRD/WISE, Altura는 GIA/IGI이며, Altura의 Polish/Symmetry는 EX입니다. 나머지 두 사이트는 GD/VG/EX를 허용합니다. 공통 기본 비율은 0.8~3이고 형광은 전체 다섯 등급입니다.
+- 링크에 없는 기본 필터도 실제 각 사이트 검색 앱과 맞춥니다. Carbon Sparkle의 감정서는 GIA/IGI/GCAL/NONE/OTHER, Aurelinne은 GIA/IGI/HRD/WISE, Altura는 GIA/IGI이며, Altura의 Polish/Symmetry는 EX입니다. 나머지 두 사이트는 GD/VG/EX를 허용합니다. 공통 기본 비율은 0.8–3이고 형광은 전체 다섯 등급입니다.
 - Fancy 다이아의 `cut=null`은 사이트 검색에서도 반환되므로 제거하지 않습니다. 요청의 `cut=["ID"]` 필터는 유지합니다.
 - 한 사이트의 조회 실패가 다른 사이트 수집을 막지 않습니다. 기존 정책대로 오류를 CSV에 남기고 워크플로를 계속하므로 당일 수집 성공 여부는 `Status`를 확인해야 합니다.
 
