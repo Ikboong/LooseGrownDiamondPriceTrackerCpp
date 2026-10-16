@@ -299,6 +299,61 @@ test('all pages are loaded, globally price sorted and reported complete only at 
   assert.deepEqual(mock.calls.filter(call=>call.siteId==='carbonsparkle').map(call=>call.offset),[0,20,40]);
 });
 
+test('matching product IDs across sites keep only the cheapest offer and its source link', async () => {
+  const prices={loosegrown:1400,carbonsparkle:1200,aurelinne:1000,altura:1100};
+  const mock=inventoryMock(Object.fromEntries(SOURCE_DEFINITIONS.map(source=>[source.id,2])),{
+    transform:({source,page})=>{
+      Object.assign(page.items[0],{id:'shared-product',price:prices[source.id]});
+      return response(page);
+    },
+  });
+  const result=await searchDiamonds(oneColor(),{endpoint,fetchImpl:mock.fetchImpl});
+  const offers=result.results.filter(item=>item.id==='shared-product');
+  assert.equal(offers.length,1);
+  assert.deepEqual(offers[0],itemFor(sourceById('aurelinne'),'single-0',{id:'shared-product',price:1000}));
+  assert.equal(result.results.length,5,'Distinct IDs remain even when their prices and diamond attributes match');
+  assert.equal(new Set(result.results.map(item=>item.id)).size,5);
+  assert.deepEqual(result.results.map(item=>item.price),[1000,1001,1001,1001,1001]);
+  assert.equal(result.complete,true);
+  assert.ok(result.sources.every(source=>source.loaded===2&&source.count===2&&source.complete),
+    'Source counts still describe the inventory that was checked');
+});
+
+test('equal-price matching IDs keep the first configured site regardless of response order', async () => {
+  let releaseFirst;
+  const firstReady=new Promise(resolve=>{releaseFirst=resolve;});
+  const completed=[];
+  const mock=inventoryMock(Object.fromEntries(SOURCE_DEFINITIONS.map(source=>[source.id,1])),{
+    transform:async({source,page})=>{
+      Object.assign(page.items[0],{id:'shared-product',price:1000});
+      if(source.id==='loosegrown') await firstReady;
+      completed.push(source.id);
+      if(source.id==='altura') releaseFirst();
+      return response(page);
+    },
+  });
+  const result=await searchDiamonds(oneColor(),{endpoint,fetchImpl:mock.fetchImpl});
+  assert.equal(completed.at(-1),'loosegrown');
+  assert.equal(result.results.length,1);
+  assert.equal(result.results[0].siteId,'loosegrown');
+  assert.equal(result.results[0].url,itemFor(lgd,'Pink-0').url);
+  assert.equal(result.complete,true);
+});
+
+test('cheapest matching ID from a partial source is retained without hiding incomplete coverage', async () => {
+  const mock=inventoryMock({carbonsparkle:2,aurelinne:1},{pageSize:1,transform:({source,body,page})=>{
+    if(source.id==='carbonsparkle'&&body.offset>0) return response({error:'Page unavailable'},502);
+    if(page.items.length) Object.assign(page.items[0],{id:'shared-product',price:source.id==='carbonsparkle'?900:1000});
+    return response(page);
+  }});
+  const result=await searchDiamonds(oneColor(),{endpoint,fetchImpl:mock.fetchImpl});
+  assert.equal(result.results.length,1);
+  assert.equal(result.results[0].siteId,'carbonsparkle');
+  assert.equal(result.results[0].price,900);
+  assert.equal(result.complete,false);
+  assert.equal(result.sources.find(source=>source.id==='carbonsparkle').status,'partial');
+});
+
 test('LGD multi-color requests are split, paginated independently and merged under one source', async () => {
   const mock=inventoryMock(body=>body.siteId!=='loosegrown'?0:body.filters.colors[0]==='Pink'?53:2);
   const result=await searchDiamonds(filters(),{endpoint,fetchImpl:mock.fetchImpl});

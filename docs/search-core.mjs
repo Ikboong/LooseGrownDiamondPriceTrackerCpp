@@ -303,6 +303,11 @@ export async function searchDiamonds(rawFilters,{signal,onProgress,endpoint,fetc
   };
   const searched=await Promise.all(SOURCE_DEFINITIONS.map(runSource));
   abortIfRequested(signal);
-  return {results:searched.flatMap(x=>x.items).sort((a,b)=>a.price-b.price),sources:searched.map(x=>x.state),
+  const cheapestById=new Map();
+  for(const {items} of searched) for(const item of items) {
+    const current=cheapestById.get(item.id);
+    if(!current || item.price<current.price) cheapestById.set(item.id,item);
+  }
+  return {results:[...cheapestById.values()].sort((a,b)=>a.price-b.price),sources:searched.map(x=>x.state),
     complete:searched.every(x=>x.state.complete),observedAt:searched.map(x=>x.state.observedAt).filter(Boolean).sort().at(-1)||new Date().toISOString()};
 }
