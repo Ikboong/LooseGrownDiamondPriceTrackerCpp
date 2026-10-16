@@ -2,7 +2,26 @@
 
 [차트 바로 보기](https://ikboong.github.io/LooseGrownDiamondPriceTrackerCpp/loosegrown.html)
 
+[다이아 시세 검색기](https://ikboong.github.io/LooseGrownDiamondPriceTrackerCpp/search.html)
+
 C++로 네 사이트의 지정 검색 조건에 맞는 최저 표시가를 매일 누적합니다.
+
+## 다이아 시세 검색기
+
+- 모양, White/Fancy 색상, 강도, 캐럿, 투명도, 컷, USD 가격과 고급 조건을 선택해 네 사이트의 현재 공개 표시가를 검색합니다.
+- 고급 조건은 테이블 비율, 가로세로 비율, 연마, 대칭, 형광, 감정기관, 성장 방식을 지원합니다. 첨부 인터페이스의 컷 네 등급과 연마·대칭 세 등급을 사용합니다.
+- 결과에는 판매처, 가격, 캐럿·등급, 조회 시각과 실제 상품 링크를 표시하며 가격순으로 정렬할 수 있습니다. 조건 변경 시 이전 결과는 지웁니다.
+- Loose Grown Diamond는 여러 팬시 색상을 색상별로 조회한 뒤 합칩니다. 해당 사이트가 지원하지 않는 조건은 명시적으로 표시합니다.
+- 한 사이트당 최대 400개 상품을 조회합니다. 결과가 더 많거나 일부 페이지가 실패하면 **일부 결과**로 표시하므로 완전 조회된 검색과 구분할 수 있습니다.
+- 실시간 조회는 공개 재고 API만 사용하는 전용 Cloudflare Worker가 중계합니다. 원사이트의 조회 실패·요청 제한을 정상 가격으로 바꾸지 않습니다. 검색 결과는 일별 차트 기록에 저장되지 않습니다.
+
+검색 페이지의 파일은 `docs/search.html`, `search.css`, `search-ui.mjs`이며, 브라우저와 Worker는 `docs/search-core.mjs`의 검증·필터 매핑을 공유합니다. `docs/search-config.json`은 공개 검색 서버 주소만 포함합니다. 계정 토큰은 포함하지 않습니다.
+
+Worker 소스와 배포 설정은 `worker/`에 있습니다. 공유 코어 또는 Worker를 수정한 경우 다음 명령으로 별도 배포한 뒤 Pages도 배포합니다.
+
+```powershell
+npx wrangler deploy --config worker/wrangler.jsonc
+```
 
 ## 차트와 전체 사이트 토글
 
@@ -77,6 +96,7 @@ C++로 네 사이트의 지정 검색 조건에 맞는 최저 표시가를 매�
 ```powershell
 ctest --test-dir build -C Release --output-on-failure
 node --test tests/chart_data.test.cjs
+node --test tests/search_core.test.mjs tests/search_worker.test.mjs
 ```
 
 API 어댑터 테스트는 실제 공개 응답을 축약한 fixture를 사용하며 네트워크에 의존하지 않습니다. 차트 테스트는 날짜별 최저가, 마지막 오류 우선, 통화, 주간 OHLC, 토글·테마·오류 화면을 검증합니다. CI에서 수집 전에 두 테스트를 실행합니다.

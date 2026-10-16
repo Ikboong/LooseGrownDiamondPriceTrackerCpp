@@ -37,7 +37,7 @@ jobs:
         run: |
           ctest --test-dir build -C Release --output-on-failure
           if ($LASTEXITCODE -ne 0) { throw "Source adapter tests failed." }
-          node --test tests/chart_data.test.cjs
+          node --test tests/chart_data.test.cjs tests/search_core.test.mjs tests/search_worker.test.mjs
           if ($LASTEXITCODE -ne 0) { throw "Chart aggregation tests failed." }
 
       - name: Measure all four diamond sites
