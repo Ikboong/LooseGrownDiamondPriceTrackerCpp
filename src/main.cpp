@@ -53,12 +53,8 @@ struct Record {
     std::string sourceUrl;
     std::string sourceId = "loosegrown";
     std::string currency = "USD";
+    double minCarats = 0;
 };
-
-const std::string kPageUrl =
-    "https://www.loosegrowndiamond.com/lab-created-colored-diamonds/"
-    "?shape=heart&carat=5.00,51.03&certificate=1,2&intensity=4"
-    "&cut=3.00,4.00&color=pink&clarity=7.00,11.00";
 
 const std::vector<std::string> kCsvHeader = {
     "TimestampKST",
@@ -236,6 +232,7 @@ std::vector<Record> ReadCsv(const std::filesystem::path& path) {
         };
         if (fields.size() > 13) record.sourceId = fields[13];
         if (fields.size() > 14) record.currency = fields[14];
+        if (fields.size() > 15 && IsNumber(fields[15])) record.minCarats = std::stod(fields[15]);
         records.push_back(record);
     }
     return records;
@@ -247,7 +244,7 @@ void WriteCsv(const std::filesystem::path& path, const std::vector<Record>& reco
     if (!output) throw std::runtime_error("cannot write CSV: " + path.string());
 
     auto header = kCsvHeader;
-    if (siteHistory) { header.push_back("SourceId"); header.push_back("Currency"); }
+    if (siteHistory) { header.push_back("SourceId"); header.push_back("Currency"); header.push_back("MinCarats"); }
     for (size_t i = 0; i < header.size(); ++i) {
         if (i) output << ",";
         output << header[i];
@@ -259,7 +256,10 @@ void WriteCsv(const std::filesystem::path& path, const std::vector<Record>& reco
             r.timestampKst, r.dateKst, r.lowestPrice, r.originalPrice, r.basePrice,
             r.discountPercent, r.sku, r.carat, r.id, r.totalMatches, r.status, r.message, r.sourceUrl,
         };
-        if (siteHistory) { fields.push_back(r.sourceId); fields.push_back(r.currency); }
+        if (siteHistory) {
+            fields.push_back(r.sourceId); fields.push_back(r.currency);
+            fields.push_back(r.minCarats > 0 ? FormatNumber(r.minCarats) : "");
+        }
         for (size_t i = 0; i < fields.size(); ++i) {
             if (i) output << ",";
             output << CsvEscape(fields[i]);
@@ -277,6 +277,7 @@ Json RecordJson(const Record& record) {
         {"siteId", record.sourceId}, {"status", record.status},
         {"message", record.message}, {"currency", record.currency},
         {"sourceUrl", record.sourceUrl},
+        {"minCarats", record.minCarats},
     };
     if (record.status == "ok" && IsNumber(record.lowestPrice)) row["value"] = std::stod(record.lowestPrice);
     if (IsNumber(record.originalPrice)) row["original"] = std::stod(record.originalPrice);
@@ -292,8 +293,10 @@ void WriteTradingViewChartHtml(const std::filesystem::path& path, const std::vec
     auto daily = Json::array();
     for (const auto& entry : latestByDate) daily.push_back(RecordJson(entry.second));
     auto sites = Json::array();
-    for (const auto& record : siteRecords) sites.push_back(RecordJson(record));
-    Json sources = Json::array({{{"id", "loosegrown"}, {"name", "Loose Grown Diamond"}, {"url", kPageUrl}}});
+    for (const auto& record : siteRecords) {
+        if (record.minCarats == kAllSitesMinCarats) sites.push_back(RecordJson(record));
+    }
+    Json sources = Json::array({{{"id", "loosegrown"}, {"name", "Loose Grown Diamond"}, {"url", LoosegrownPageUrl(kAllSitesMinCarats)}}});
     for (const auto& source : NivodaSources()) {
         sources.push_back({{"id", source.id}, {"name", source.name}, {"url", source.pageUrl}});
     }
@@ -304,46 +307,49 @@ void WriteTradingViewChartHtml(const std::filesystem::path& path, const std::vec
     if (!output) throw std::runtime_error("failed while writing chart HTML");
 }
 
-PriceResult FetchLowestPrice() {
-    const std::string apiUrl = "https://www.loosegrowndiamond.com/wp-json/ls/v1/inventory-colored";
+struct TemporaryJsonBody {
+    std::filesystem::path path;
+    explicit TemporaryJsonBody(const Json& body) {
+        static std::atomic<unsigned long long> serial{0};
+        const auto ticks = std::chrono::high_resolution_clock::now().time_since_epoch().count();
+        path = std::filesystem::temp_directory_path() /
+            ("diamond-request-" + std::to_string(ticks) + "-" + std::to_string(serial++) + ".json");
+        std::ofstream output(path, std::ios::binary);
+        if (!output) throw std::runtime_error("cannot create API request file");
+        output << body.dump();
+        if (!output) throw std::runtime_error("cannot write API request file");
+    }
+    ~TemporaryJsonBody() { std::error_code error; std::filesystem::remove(path, error); }
+};
 
-    std::string challengeHtml = RunCommand("curl.exe --fail --connect-timeout 15 --max-time 60 -sS -L -A \"Mozilla/5.0\" \"" + kPageUrl + "\"");
+PriceResult FetchLowestPrice(int minCarats) {
+    const std::string apiUrl = "https://www.loosegrowndiamond.com/wp-json/ls/v1/inventory-colored";
+    const auto pageUrl = LoosegrownPageUrl(minCarats);
+
+    std::string challengeHtml = RunCommand("curl.exe --fail --connect-timeout 15 --max-time 60 -sS -L -A \"Mozilla/5.0\" \"" + pageUrl + "\"");
     std::string cookie = ExtractSucuriCookie(challengeHtml);
     if (cookie.empty()) throw std::runtime_error("could not extract Sucuri challenge cookie");
 
     PriceResult best;
     const int perPage = 50;
-    const std::string bodyFile = "loosegrown_body.json";
 
     for (int page = 1; page <= 100; ++page) {
-        {
-            std::ofstream body(bodyFile, std::ios::binary);
-            body << "{\"ls_start\":" << page
-                 << ",\"ls_per_page\":50"
-                 << ",\"carat_range\":\"5,51.03\""
-                 << ",\"cut_range\":\"3,4\""
-                 << ",\"colored\":\"2\""
-                 << ",\"clarity_range\":\"7,11\""
-                 << ",\"intensity\":[4]"
-                 << ",\"certificate_type\":[\"1\",\"2\"]"
-                 << ",\"shape\":[\"heart\"]}";
-        }
+        const TemporaryJsonBody body(BuildLoosegrownRequest(page, minCarats));
 
         std::string command =
             "curl.exe --fail --connect-timeout 15 --max-time 60 -sS -L -A \"Mozilla/5.0\" "
             "-H \"Content-Type: application/json\" "
             "-H \"Accept: application/json, text/plain, */*\" "
-            "-H \"Referer: " + kPageUrl + "\" "
+            "-H \"Referer: " + pageUrl + "\" "
             "-b \"" + cookie + "\" "
-            "--data-binary \"@" + bodyFile + "\" "
+            "--data-binary \"@" + body.path.string() + "\" "
             "\"" + apiUrl + "\"";
 
-        const auto inventory = ParseLoosegrownInventory(RunCommand(command));
+        const auto inventory = ParseLoosegrownInventory(RunCommand(command), minCarats);
         const auto total = inventory.at("total").get<int>();
         if (page == 1) best.totalMatches = total;
         else if (total != best.totalMatches) throw std::runtime_error("Loose Grown Diamond inventory changed during pagination");
         if (total == 0) {
-            std::remove(bodyFile.c_str());
             best.status = "no_matches";
             best.message = "No diamonds match the supplied search filters";
             return best;
@@ -371,8 +377,6 @@ PriceResult FetchLowestPrice() {
         if (page * perPage >= best.totalMatches) break;
     }
 
-    std::remove(bodyFile.c_str());
-
     if (!std::isfinite(best.lowestPrice)) {
         throw std::runtime_error("no matching diamonds found");
     }
@@ -380,21 +384,6 @@ PriceResult FetchLowestPrice() {
     best.message = "ok";
     return best;
 }
-
-struct TemporaryJsonBody {
-    std::filesystem::path path;
-    explicit TemporaryJsonBody(const Json& body) {
-        static std::atomic<unsigned long long> serial{0};
-        const auto ticks = std::chrono::high_resolution_clock::now().time_since_epoch().count();
-        path = std::filesystem::temp_directory_path() /
-            ("diamond-request-" + std::to_string(ticks) + "-" + std::to_string(serial++) + ".json");
-        std::ofstream output(path, std::ios::binary);
-        if (!output) throw std::runtime_error("cannot create API request file");
-        output << body.dump();
-        if (!output) throw std::runtime_error("cannot write API request file");
-    }
-    ~TemporaryJsonBody() { std::error_code error; std::filesystem::remove(path, error); }
-};
 
 Json PostJson(const std::string& url, const Json& body) {
     TemporaryJsonBody file(body);
@@ -444,7 +433,7 @@ PriceResult FetchNivodaLowestPrice(const NivodaSource& source) {
     return best;
 }
 
-Record CollectSource(const std::string& id) {
+Record CollectSource(const std::string& id, bool legacy = false) {
     Record record;
     const auto timestamp = CurrentKstTimestamp();
     record.timestampKst = timestamp.first;
@@ -452,12 +441,13 @@ Record CollectSource(const std::string& id) {
     record.sourceId = id;
     const auto& sources = NivodaSources();
     const auto found = std::find_if(sources.begin(), sources.end(), [&](const NivodaSource& source) { return source.id == id; });
-    record.sourceUrl = id == "loosegrown" ? kPageUrl : found->pageUrl;
+    record.minCarats = legacy ? 5 : kAllSitesMinCarats;
+    record.sourceUrl = id == "loosegrown" ? LoosegrownPageUrl(static_cast<int>(record.minCarats)) : found->pageUrl;
     try {
         PriceResult result;
         for (int attempt = 1; attempt <= 3; ++attempt) {
             try {
-                result = id == "loosegrown" ? FetchLowestPrice() : FetchNivodaLowestPrice(*found);
+                result = id == "loosegrown" ? FetchLowestPrice(static_cast<int>(record.minCarats)) : FetchNivodaLowestPrice(*found);
                 break;
             } catch (const std::exception& error) {
                 std::cerr << id << " attempt " << attempt << " failed: " << error.what() << "\n";
@@ -510,18 +500,28 @@ int main(int argc, char** argv) {
             throw std::runtime_error("unknown source: " + sourceFilter);
         }
         if (!chartOnly) {
+            std::future<Record> legacy;
+            if (sourceFilter.empty() || sourceFilter == "loosegrown") {
+                legacy = std::async(std::launch::async, CollectSource, "loosegrown", true);
+            }
             std::vector<std::future<Record>> pending;
             for (const auto& id : sourceIds) {
                 if (!sourceFilter.empty() && sourceFilter != id) continue;
-                pending.push_back(std::async(std::launch::async, CollectSource, id));
+                pending.push_back(std::async(std::launch::async, CollectSource, id, false));
             }
             for (auto& future : pending) {
                 auto record = future.get();
-                if (record.sourceId == "loosegrown") records.push_back(record);
                 siteRecords.push_back(record);
                 std::cout << record.sourceId << ": " << record.status << " price=" << record.lowestPrice
+                    << " USD minCarats=" << record.minCarats << " matches=" << record.totalMatches << "\n";
+                if (record.status != "ok") std::cout << "Message: " << record.message << "\n";
+            }
+            if (legacy.valid()) {
+                auto record = legacy.get();
+                std::cout << "loosegrown (legacy 5ct): " << record.status << " price=" << record.lowestPrice
                     << " USD matches=" << record.totalMatches << "\n";
                 if (record.status != "ok") std::cout << "Message: " << record.message << "\n";
+                records.push_back(record);
             }
             WriteCsv(csvPath, records);
             WriteCsv(sitesPath, siteRecords, true);

@@ -82,7 +82,7 @@ inline std::string RenderChartHtml(const std::string& dailyJson,
       <button id="weeklyButton" type="button" aria-pressed="false">Weekly candle</button>
     </div>
     <button class="switch" id="allSitesSwitch" type="button" role="switch" aria-checked="false" aria-describedby="scopeNote">
-      <span>전체 사이트 최저가</span><span class="switch-track" aria-hidden="true"><span class="switch-thumb"></span></span>
+      <span>전체 사이트 최저가 · 10ct 이상</span><span class="switch-track" aria-hidden="true"><span class="switch-thumb"></span></span>
     </button>
   </div>
   <p class="scope-note" id="scopeNote"></p>
@@ -265,8 +265,8 @@ document.addEventListener('DOMContentLoaded', function () {
     byId('dailyButton').setAttribute('aria-pressed',String(activeView === 'daily'));
     byId('weeklyButton').setAttribute('aria-pressed',String(activeView === 'weekly'));
     byId('scopeNote').textContent = allSites
-      ? '대상 ' + allData.sources.length + '개 사이트의 지정 검색 조건을 비교합니다. 같은 날짜의 사이트별 마지막 조회 결과 중 USD 최저가를 사용하며, 실패한 사이트의 이전 가격은 사용하지 않습니다. 사이트마다 검색 조건 범위가 다릅니다.'
-      : 'Loose Grown Diamond의 기존 일별 가격 기록입니다. 전체 사이트 비교를 켜면 별도로 수집한 날짜부터 표시합니다.';
+      ? '대상 ' + allData.sources.length + '개 사이트에서 최소 10ct 조건의 USD 최저가를 비교합니다. 10ct 기준으로 수집한 기록부터 표시하며, 기존 5ct 기록은 포함하지 않습니다. 같은 날짜의 마지막 조회 결과를 사용하며, 사이트별 나머지 검색 조건과 최대 캐럿은 유지합니다.'
+      : 'Loose Grown Diamond의 기존 5ct 이상 일별 가격 기록입니다. 전체 사이트 비교를 켜면 별도로 수집한 10ct 이상 최저가를 표시합니다.';
     byId('coverage').hidden = !allSites;
     byId('coverageText').textContent = coverageText(latest);
     byId('coverage').dataset.partial = String(!latest || latest.partial);

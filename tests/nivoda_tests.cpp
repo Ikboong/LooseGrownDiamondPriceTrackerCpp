@@ -59,9 +59,9 @@ struct Runner {
 
 int main(int argc, char** argv) {
 #ifdef FIXTURE_DIR
-    const auto defaultFixtureRoot = std::filesystem::path(FIXTURE_DIR);
+    const auto defaultFixtureRoot = std::filesystem::u8path(FIXTURE_DIR);
 #else
-    const auto defaultFixtureRoot = std::filesystem::path(__FILE__).parent_path() / "fixtures";
+    const auto defaultFixtureRoot = std::filesystem::u8path(__FILE__).parent_path() / "fixtures";
 #endif
     const auto fixtureRoot = argc > 1 ? std::filesystem::path(argv[1])
         : defaultFixtureRoot;
@@ -75,11 +75,14 @@ int main(int argc, char** argv) {
     });
 
     for (const auto& source : NivodaSources()) {
-        runner.Run(source.id + " request matches observed storefront filters", [&] {
+        runner.Run(source.id + " request changes the observed minimum to ten carats", [&] {
             const auto fixture = LoadFixture(fixtureRoot, source.id);
-            Require(BuildNivodaRequest(source) == fixture.at("request"),
-                "Request differs from independently captured storefront request");
             auto expected = fixture.at("request");
+            expected["query"]["sizes"]["from"] = 10;
+            Require(source.minCarats == 10, "All-site source must start at ten carats");
+            Require(source.pageUrl.find("carats_min=10&") != std::string::npos, "Storefront link must match the minimum");
+            Require(BuildNivodaRequest(source) == expected,
+                "Only the minimum carat should change from the independently captured request");
             expected["offset"] = 37;
             Require(BuildNivodaRequest(source, 37) == expected,
                 "Offset must be an item offset without changing filters");
@@ -88,12 +91,14 @@ int main(int argc, char** argv) {
         runner.Run(source.id + " parses every observed inventory item", [&] {
             const auto fixture = LoadFixture(fixtureRoot, source.id);
             const auto& items = fixture.at("items");
+            auto historicalSource = source;
+            historicalSource.minCarats = 5;
             Require(items.size() == fixture.at("expected_count").get<size_t>(), "Incomplete fixture");
             size_t mixedColors = 0;
             size_t nullCuts = 0;
             double minimum = std::numeric_limits<double>::infinity();
             for (const auto& item : items) {
-                const auto quote = ParseNivodaQuote(item, source);
+                const auto quote = ParseNivodaQuote(item, historicalSource);
                 const auto expectedPrice = item.at("price").get<double>();
                 Require(quote.price == expectedPrice && quote.originalPrice == expectedPrice,
                     "Observed inventory price changed");
@@ -112,6 +117,7 @@ int main(int argc, char** argv) {
     Json valid;
     runner.Run("load mutation fixture", [&] {
         valid = LoadFixture(fixtureRoot, "carbonsparkle").at("items").at(0);
+        valid["certificate"]["carats"] = 10.12;
     });
     if (!valid.is_object()) {
         std::cerr << "Nivoda tests: " << runner.passed << " passed, " << runner.failed << " failed\n";
@@ -146,10 +152,10 @@ int main(int argc, char** argv) {
     runner.Run("numeric strings retain their value and normalize carat", [&] {
         auto item = valid;
         item["price"] = "1234.50";
-        item["certificate"]["carats"] = "5.12";
+        item["certificate"]["carats"] = "10.12";
         const auto quote = ParseNivodaQuote(item, carbon);
         Require(quote.price == 1234.5, "Numeric price text changed");
-        Require(quote.carat == "5.12", "Numeric carat text must not retain JSON string quotes");
+        Require(quote.carat == "10.12", "Numeric carat text must not retain JSON string quotes");
     });
     runner.Run("explicit USD and requested color/intensity bounds accepted", [&] {
         for (const auto& color : {"Fancy Deep Pink", "Fancy Vivid Red", "Fancy Deep Red", "Fancy Vivid Orange Pink"}) {
@@ -162,7 +168,7 @@ int main(int argc, char** argv) {
     });
     runner.Run("inclusive carat and clarity bounds accepted", [&] {
         for (const auto& source : NivodaSources()) {
-            for (const auto carats : {5, source.maxCarats}) {
+            for (const auto carats : {10, source.maxCarats}) {
                 for (const auto& clarity : {"VVS2", "VVS1", "IF", "FL"}) {
                     auto item = valid;
                     item["certificate"]["carats"] = carats;
@@ -218,7 +224,8 @@ int main(int argc, char** argv) {
     RejectMutation("missing carat", [](Json& item) { item["certificate"].erase("carats"); });
     RejectMutation("null carat", [](Json& item) { item["certificate"]["carats"] = nullptr; });
     RejectMutation("zero carat", [](Json& item) { item["certificate"]["carats"] = 0; });
-    RejectMutation("carat below five", [](Json& item) { item["certificate"]["carats"] = 4.99; });
+    RejectMutation("carat below ten", [](Json& item) { item["certificate"]["carats"] = 9.99; });
+    RejectMutation("former five-carat result", [](Json& item) { item["certificate"]["carats"] = 5.12; });
     RejectMutation("carat above fifty", [](Json& item) { item["certificate"]["carats"] = 50.01; });
     for (const auto& source : {Source("aurelinne"), Source("altura")}) {
         auto item = valid;

@@ -252,12 +252,14 @@ test('switch click handler changes the series and restores legacy daily data', (
   ui.get('allSitesSwitch').click();
   assert.equal(ui.get('allSitesSwitch').attrs['aria-checked'], 'true');
   assert.equal(ui.lastSeries().data[0].value, 1900);
+  assert.match(ui.get('scopeNote').textContent, /최소 10ct/);
   assert.equal(ui.get('siteCards').children.length, 4);
   assert.match(ui.get('coverageText').textContent, /1\/4/);
   assert.match(ui.get('coverageText').textContent, /조회 실패 또는 미수집/);
   ui.get('allSitesSwitch').click();
   assert.equal(ui.get('allSitesSwitch').attrs['aria-checked'], 'false');
   assert.equal(ui.lastSeries().data[0].value, 2013);
+  assert.match(ui.get('scopeNote').textContent, /기존 5ct 이상/);
   assert.equal(ui.get('siteCards').hidden, true);
 });
 

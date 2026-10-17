@@ -8,6 +8,7 @@
 #include <vector>
 
 #include "../third_party/nlohmann/json.hpp"
+#include "tracking_filters.h"
 
 using Json = nlohmann::json;
 
@@ -19,18 +20,19 @@ struct NivodaSource {
     int maxCarats;
     std::vector<std::string> labs;
     bool excellentOnly = false;
+    int minCarats = kAllSitesMinCarats;
 };
 
 inline const std::vector<NivodaSource>& NivodaSources() {
     static const std::vector<NivodaSource> sources = {
         {"carbonsparkle", "Carbon Sparkle", "https://www.carbonsparkle.com",
-         "https://www.carbonsparkle.com/pages/diamonds?activeTab=Lab+Grown&queryLabGrown=true&isFancy=true&fancy_color=Red%2CPink&carats_min=5&carats_max=50&clarity_min=VVS2&clarity_max=FL&intensity_min=Fancy_Deep&intensity_max=Fancy_Vivid&cut_min=ID&cut_max=ID&shapes=heart",
+         "https://www.carbonsparkle.com/pages/diamonds?activeTab=Lab+Grown&queryLabGrown=true&isFancy=true&fancy_color=Red%2CPink&carats_min=" + std::to_string(kAllSitesMinCarats) + "&carats_max=50&clarity_min=VVS2&clarity_max=FL&intensity_min=Fancy_Deep&intensity_max=Fancy_Vivid&cut_min=ID&cut_max=ID&shapes=heart",
          50, {"GIA", "IGI", "GCAL", "NONE", "OTHER"}},
         {"aurelinne", "Aurelinne", "https://aurelinne.com",
-         "https://aurelinne.com/pages/lab-grown?activeTab=Lab+Grown&queryLabGrown=true&isFancy=true&carats_min=5&carats_max=20&clarity_min=VVS2&clarity_max=FL&fancy_color=Pink%2CRed&intensity_min=Fancy_Deep&intensity_max=Fancy_Vivid&cut_min=ID&cut_max=ID&shapes=heart",
+         "https://aurelinne.com/pages/lab-grown?activeTab=Lab+Grown&queryLabGrown=true&isFancy=true&carats_min=" + std::to_string(kAllSitesMinCarats) + "&carats_max=20&clarity_min=VVS2&clarity_max=FL&fancy_color=Pink%2CRed&intensity_min=Fancy_Deep&intensity_max=Fancy_Vivid&cut_min=ID&cut_max=ID&shapes=heart",
          20, {"GIA", "IGI", "HRD", "WISE"}},
         {"altura", "Altura Diamonds", "https://alturadiamonds.com",
-         "https://alturadiamonds.com/collections/lab-diamonds?activeTab=Lab+Grown&queryLabGrown=true&shapes=heart&carats_min=5&carats_max=20&cut_min=ID&cut_max=ID&clarity_min=VVS2&clarity_max=FL&polish=EX&symmetry=EX&isFancy=true&fancy_color=Pink%2CRed&intensity_min=Fancy_Deep&intensity_max=Fancy_Vivid",
+         "https://alturadiamonds.com/collections/lab-diamonds?activeTab=Lab+Grown&queryLabGrown=true&shapes=heart&carats_min=" + std::to_string(kAllSitesMinCarats) + "&carats_max=20&cut_min=ID&cut_max=ID&clarity_min=VVS2&clarity_max=FL&polish=EX&symmetry=EX&isFancy=true&fancy_color=Pink%2CRed&intensity_min=Fancy_Deep&intensity_max=Fancy_Vivid",
          20, {"GIA", "IGI"}, true},
     };
     return sources;
@@ -46,7 +48,7 @@ inline Json BuildNivodaRequest(const NivodaSource& source, int offset = 0) {
         {"order", {{"type", "price"}, {"direction", "ASC"}}},
         {"query", {
             {"labgrown", true}, {"shapes", {"HEART"}},
-            {"sizes", {{"from", 5}, {"to", source.maxCarats}}},
+            {"sizes", {{"from", source.minCarats}, {"to", source.maxCarats}}},
             {"clarity", {"VVS2", "VVS1", "IF", "FL"}}, {"cut", {"ID"}},
             {"color", {"FANCY"}}, {"fancyColor", colors},
             {"fancyIntensity", {"Fancy_Deep", "Fancy_Vivid"}},
@@ -94,7 +96,7 @@ inline NivodaQuote ParseNivodaQuote(const Json& item, const NivodaSource& source
     const auto lab = certificate.at("lab").get<std::string>();
     const bool wantedLab = std::find(source.labs.begin(), source.labs.end(), lab) != source.labs.end();
     if (!certificate.at("labgrown").get<bool>() || certificate.at("shape") != "HEART"
-        || carats < 5 || carats > source.maxCarats || !wantedColor || !wantedClarity || !wantedLab) {
+        || carats < source.minCarats || carats > source.maxCarats || !wantedColor || !wantedClarity || !wantedLab) {
         throw std::runtime_error("inventory API returned a diamond outside the requested filters");
     }
     // Fancy shapes often have no cut grade. The storefront applies cut=ID on

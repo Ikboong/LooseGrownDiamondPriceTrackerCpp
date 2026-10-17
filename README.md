@@ -27,10 +27,10 @@ npx wrangler deploy --config worker/wrangler.jsonc
 ## 차트와 전체 사이트 토글
 
 - **전체 사이트 최저가 OFF**: 기존 Loose Grown Diamond의 일별 기록을 표시합니다.
-- **전체 사이트 최저가 ON**: Loose Grown Diamond, Carbon Sparkle, Aurelinne, Altura Diamonds의 같은 날짜 최저 표시가 중 최솟값을 표시합니다.
+- **전체 사이트 최저가 ON**: 네 사이트 모두 **최소 10ct** 조건으로 수집한 같은 날짜 최저 표시가 중 최솟값을 표시합니다. 최대 캐럿과 나머지 사이트별 조건은 유지합니다.
 - iOS 스타일 스위치는 클릭, Space, Enter로 조작할 수 있습니다.
 - 일봉은 TradingView Lightweight Charts 라인차트, 주봉은 일별 최저가를 월요일 시작 주간 OHLC로 집계한 캔들차트입니다. 상승은 빨강, 하락은 파랑입니다.
-- 통합 기록은 2026-10-16부터 수집합니다. 기존 단일 사이트의 과거 기록을 전체 사이트 관측값으로 소급 복제하지 않습니다.
+- 기존 5ct 통합 기록은 CSV에 보존하며, 통합 차트에는 새 10ct 기준으로 수집한 기록만 표시합니다. 과거의 5ct 최저가를 10ct 최저가로 소급 복제하지 않습니다.
 - 사이트별 최근 가격, 관측 시각, 검색 결과 링크와 최저가 출처를 함께 표시합니다.
 - 일부 사이트가 실패하면 확인된 사이트 수를 표시합니다. 실패한 사이트의 과거 가격은 당일 통합 최저가에 재사용하지 않습니다. 조회 성공 후 조건 일치 상품이 0개인 경우는 `no_matches`로 구분합니다.
 - 모든 가격은 **USD 상품 표시가**입니다. 배송비, 세금, 결제 단계 비용은 포함하지 않습니다. 각 사이트는 아래에 명시한 자체 검색 조건을 유지하므로 조건 범위가 완전히 동일하지는 않습니다.
@@ -39,13 +39,16 @@ npx wrangler deploy --config worker/wrangler.jsonc
 
 대상 URL:
 
-[Loose Grown Diamond 검색 결과 열기](https://www.loosegrowndiamond.com/lab-created-colored-diamonds/?shape=heart&carat=5.00,51.03&certificate=1,2&intensity=4&cut=3.00,4.00&color=pink&clarity=7.00,11.00)
+기존 단일 사이트 차트: [Loose Grown Diamond 5ct 이상 검색 결과 열기](https://www.loosegrowndiamond.com/lab-created-colored-diamonds/?shape=heart&carat=5.00,51.03&certificate=1,2&intensity=4&cut=3.00,4.00&color=pink&clarity=7.00,11.00)
+
+전체 사이트 최저가 차트:
 
 | 사이트 | 지정 검색 조건 | 링크 |
 |---|---|---|
-| Carbon Sparkle | Heart, Pink/Red, 5–50ct, VVS2–FL, Fancy Deep–Fancy Vivid, ID | [검색 결과](https://www.carbonsparkle.com/pages/diamonds?activeTab=Lab+Grown&queryLabGrown=true&isFancy=true&fancy_color=Red%2CPink&carats_min=5&carats_max=50&clarity_min=VVS2&clarity_max=FL&intensity_min=Fancy_Deep&intensity_max=Fancy_Vivid&cut_min=ID&cut_max=ID&shapes=heart) |
-| Aurelinne | Heart, Pink/Red, 5–20ct, VVS2–FL, Fancy Deep–Fancy Vivid, ID | [검색 결과](https://aurelinne.com/pages/lab-grown?activeTab=Lab+Grown&queryLabGrown=true&isFancy=true&carats_min=5&carats_max=20&clarity_min=VVS2&clarity_max=FL&fancy_color=Pink%2CRed&intensity_min=Fancy_Deep&intensity_max=Fancy_Vivid&cut_min=ID&cut_max=ID&shapes=heart) |
-| Altura Diamonds | Heart, Pink/Red, 5–20ct, VVS2–FL, Fancy Deep–Fancy Vivid, ID, Polish EX, Symmetry EX | [검색 결과](https://alturadiamonds.com/collections/lab-diamonds?activeTab=Lab+Grown&queryLabGrown=true&shapes=heart&carats_min=5&carats_max=20&cut_min=ID&cut_max=ID&clarity_min=VVS2&clarity_max=FL&polish=EX&symmetry=EX&isFancy=true&fancy_color=Pink%2CRed&intensity_min=Fancy_Deep&intensity_max=Fancy_Vivid) |
+| Loose Grown Diamond | Heart, Pink, 10–51.03ct, VVS2–FL, Fancy Vivid, EX–ID | [검색 결과](https://www.loosegrowndiamond.com/lab-created-colored-diamonds/?shape=heart&carat=10.00,51.03&certificate=1,2&intensity=4&cut=3.00,4.00&color=pink&clarity=7.00,11.00) |
+| Carbon Sparkle | Heart, Pink/Red, 10–50ct, VVS2–FL, Fancy Deep–Fancy Vivid, ID | [검색 결과](https://www.carbonsparkle.com/pages/diamonds?activeTab=Lab+Grown&queryLabGrown=true&isFancy=true&fancy_color=Red%2CPink&carats_min=10&carats_max=50&clarity_min=VVS2&clarity_max=FL&intensity_min=Fancy_Deep&intensity_max=Fancy_Vivid&cut_min=ID&cut_max=ID&shapes=heart) |
+| Aurelinne | Heart, Pink/Red, 10–20ct, VVS2–FL, Fancy Deep–Fancy Vivid, ID | [검색 결과](https://aurelinne.com/pages/lab-grown?activeTab=Lab+Grown&queryLabGrown=true&isFancy=true&carats_min=10&carats_max=20&clarity_min=VVS2&clarity_max=FL&fancy_color=Pink%2CRed&intensity_min=Fancy_Deep&intensity_max=Fancy_Vivid&cut_min=ID&cut_max=ID&shapes=heart) |
+| Altura Diamonds | Heart, Pink/Red, 10–20ct, VVS2–FL, Fancy Deep–Fancy Vivid, ID, Polish EX, Symmetry EX | [검색 결과](https://alturadiamonds.com/collections/lab-diamonds?activeTab=Lab+Grown&queryLabGrown=true&shapes=heart&carats_min=10&carats_max=20&cut_min=ID&cut_max=ID&clarity_min=VVS2&clarity_max=FL&polish=EX&symmetry=EX&isFancy=true&fancy_color=Pink%2CRed&intensity_min=Fancy_Deep&intensity_max=Fancy_Vivid) |
 
 수집 방식:
 
@@ -63,7 +66,7 @@ npx wrangler deploy --config worker/wrangler.jsonc
 출력:
 
 - `data/loosegrown_price_history.csv`
-- `data/site_price_history.csv`: 네 사이트별 관측 기록. 기존 CSV 필드에 `SourceId`, `Currency`를 추가합니다.
+- `data/site_price_history.csv`: 네 사이트별 관측 기록. 기존 CSV 필드에 `SourceId`, `Currency`, `MinCarats`를 추가합니다. `MinCarats=10`인 기록만 현재 통합 차트에 사용하며, 이 필드가 없는 과거 기록은 보존하고 통합 집계에서 제외합니다.
 - `data/loosegrown_tradingview_chart.html`
 - `docs/loosegrown.html`: GitHub Pages 배포용 차트
 
@@ -100,7 +103,7 @@ node --test tests/chart_data.test.cjs
 node --test tests/search_core.test.mjs tests/search_worker.test.mjs
 ```
 
-API 어댑터 테스트는 실제 공개 응답을 축약한 fixture를 사용하며 네트워크에 의존하지 않습니다. 차트 테스트는 날짜별 최저가, 마지막 오류 우선, 통화, 주간 OHLC, 토글·테마·오류 화면을 검증합니다. CI에서 수집 전에 두 테스트를 실행합니다.
+API 어댑터 테스트는 실제 공개 응답을 축약한 fixture를 사용하며 네트워크에 의존하지 않습니다. 캐럿 경계와 5ct·10ct 이력 분리를 검증하며, 차트 테스트는 날짜별 최저가, 마지막 오류 우선, 통화, 주간 OHLC, 토글·테마·오류 화면을 검증합니다. CI에서 수집 전에 실행합니다.
 
 JSON 파싱에는 MIT 라이선스의 [nlohmann/json 3.11.3](https://github.com/nlohmann/json/tree/v3.11.3)을 사용합니다. 헤더와 라이선스는 `third_party/nlohmann`에 포함되어 있어 빌드 중 추가 다운로드가 필요 없습니다.
 
